@@ -51,10 +51,13 @@ class SitemapScraper:
         )
         return post_sitemaps
 
-    def fetch_post_sitemaps(self, sitemaps):
-        """Fetches the post sitemaps and extracts the article URLs."""
+    def fetch_post_sitemaps(self, sitemaps, max_urls=None):
+        """Fetches the post sitemaps and extracts the article URLs up to a specified limit."""
         article_urls = []
         for sitemap_url in sitemaps:
+            if max_urls is not None and len(article_urls) >= max_urls:
+                break  # Stop if we have reached the desired number of URLs
+
             logging.info("Fetching post sitemap from %s", sitemap_url)
             try:
                 response = requests.get(sitemap_url)
@@ -65,7 +68,10 @@ class SitemapScraper:
 
             soup = BeautifulSoup(response.content, "xml")
             urls = [url.loc.text for url in soup.findAll("url")]
-            article_urls.extend(urls)
+            article_urls.extend(
+                urls[: max_urls - len(article_urls)] if max_urls else urls
+            )
+
             logging.info(
                 "Successfully fetched and parsed post sitemap."
                 " Articles found: %d",
@@ -79,14 +85,14 @@ class SitemapScraper:
         )
         return article_urls
 
-    def get_article_urls(self):
-        """Main function to fetch all article URLs."""
+    def get_article_urls(self, max_urls=None):
+        """Main function to fetch article URLs, optionally up to a maximum number."""
         logging.info("Starting the process to fetch all article URLs.")
         post_sitemaps = self.fetch_main_sitemap()
         if not post_sitemaps:
             logging.error("No post sitemaps found.")
             return []
-        return self.fetch_post_sitemaps(post_sitemaps)
+        return self.fetch_post_sitemaps(post_sitemaps, max_urls=max_urls)
 
 
 class RapplerScraper:
@@ -164,7 +170,7 @@ class RapplerScraper:
 if __name__ == "__main__":
     sitemap_url = "https://www.rappler.com/sitemap_index.xml"
     sitemap_scraper = SitemapScraper(sitemap_url)
-    article_urls = sitemap_scraper.get_article_urls()
+    article_urls = sitemap_scraper.get_article_urls(1)
 
     data_list = []
     for url in article_urls[:1]:
