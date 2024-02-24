@@ -165,6 +165,11 @@ class RapplerScraper:
         title = self.get_element_text(self.ARTICLE_TITLE_XPATH)
         content = self.get_element_text(self.ARTICLE_CONTENT_XPATH)
 
+        if not title or not content:
+            logging.error("Failed to collect title or content.")
+            self.driver.quit()
+            return {}
+
         try:
             try:
                 self.click_element_via_js(self.SEE_VOTES_XPATH)
