@@ -1,7 +1,41 @@
+import time
+
+import requests
+from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
+
+
+class SitemapScraper:
+    def __init__(self, main_sitemap_url):
+        self.main_sitemap_url = main_sitemap_url
+
+    def fetch_main_sitemap(self):
+        response = requests.get(self.main_sitemap_url)
+        soup = BeautifulSoup(response.content, "xml")
+        sitemap_tags = soup.find_all("sitemap")
+        post_sitemaps = [
+            tag.find("loc").text
+            for tag in sitemap_tags
+            if "post-sitemap" in tag.find("loc").text
+        ]
+        return post_sitemaps
+
+    def fetch_post_sitemaps(self, sitemaps):
+        article_urls = []
+        for sitemap_url in sitemaps:
+            response = requests.get(sitemap_url)
+            soup = BeautifulSoup(response.content, "xml")
+            urls = [url.loc.text for url in soup.findAll("url")]
+            article_urls.extend(urls)
+        return article_urls
+
+    def get_article_urls(self):
+        post_sitemaps = self.fetch_main_sitemap()
+        article_urls = self.fetch_post_sitemaps(post_sitemaps)
+        return article_urls
 
 
 class RapplerScraper:
@@ -27,7 +61,7 @@ class RapplerScraper:
         )
 
     def click_element_via_js(self, identifier):
-        """Clicks an element specified by selector using JavaScript execution."""
+        """Clicks an element using JavaScript execution."""
         element = self.wait_for(identifier)
         self.driver.execute_script("arguments[0].click();", element)
 
@@ -77,7 +111,15 @@ class RapplerScraper:
 
 
 if __name__ == "__main__":
-    article_url = "https://www.rappler.com/newsbreak/explainers/how-cory-aquino-cardinal-sin-blocked-charter-change-1997/"
-    scraper = RapplerScraper(article_url)
-    data = scraper.scrape_article()
-    print(data)
+    sitemap_url = "https://www.rappler.com/sitemap_index.xml"
+    sitemap_scraper = SitemapScraper(sitemap_url)
+    article_urls = sitemap_scraper.get_article_urls()
+
+    for url in article_urls[:1]:
+        try:
+            scraper = RapplerScraper(url)
+            data = scraper.scrape_article()
+            print(data)
+            time.sleep(1)  # Delay to avoid getting blocked
+        except Exception as e:
+            print(f"Failed to scrape {url}: {e}")
