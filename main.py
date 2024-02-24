@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 
 import requests
@@ -8,13 +9,33 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
+
 
 class SitemapScraper:
     def __init__(self, main_sitemap_url):
         self.main_sitemap_url = main_sitemap_url
+        logging.info(
+            "SitemapScraper instance created with main sitemap URL: %s",
+            main_sitemap_url,
+        )
 
     def fetch_main_sitemap(self):
-        response = requests.get(self.main_sitemap_url)
+        """Fetches the main sitemap and extracts the post sitemaps."""
+        logging.info(
+            "Fetching main sitemap from %s",
+            self.main_sitemap_url,
+        )
+        try:
+            response = requests.get(self.main_sitemap_url)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            logging.error("Failed to fetch the main sitemap: %s", e)
+            return []
+
         soup = BeautifulSoup(response.content, "xml")
         sitemap_tags = soup.find_all("sitemap")
         post_sitemaps = [
@@ -22,21 +43,50 @@ class SitemapScraper:
             for tag in sitemap_tags
             if "post-sitemap" in tag.find("loc").text
         ]
+
+        logging.info(
+            "Successfully fetched and parsed main sitemap."
+            " Post sitemaps found: %d",
+            len(post_sitemaps),
+        )
         return post_sitemaps
 
     def fetch_post_sitemaps(self, sitemaps):
+        """Fetches the post sitemaps and extracts the article URLs."""
         article_urls = []
         for sitemap_url in sitemaps:
-            response = requests.get(sitemap_url)
+            logging.info("Fetching post sitemap from %s", sitemap_url)
+            try:
+                response = requests.get(sitemap_url)
+                response.raise_for_status()
+            except requests.exceptions.RequestException as e:
+                logging.error("Failed to fetch the post sitemap: %s", e)
+                continue  # Skip to the next sitemap
+
             soup = BeautifulSoup(response.content, "xml")
             urls = [url.loc.text for url in soup.findAll("url")]
             article_urls.extend(urls)
+            logging.info(
+                "Successfully fetched and parsed post sitemap."
+                " Articles found: %d",
+                len(urls),
+            )
+
+        article_urls = list(set(article_urls))
+        logging.info(
+            "Total unique article URLs extracted: %d",
+            len(article_urls),
+        )
         return article_urls
 
     def get_article_urls(self):
+        """Main function to fetch all article URLs."""
+        logging.info("Starting the process to fetch all article URLs.")
         post_sitemaps = self.fetch_main_sitemap()
-        article_urls = self.fetch_post_sitemaps(post_sitemaps)
-        return article_urls
+        if not post_sitemaps:
+            logging.error("No post sitemaps found.")
+            return []
+        return self.fetch_post_sitemaps(post_sitemaps)
 
 
 class RapplerScraper:
