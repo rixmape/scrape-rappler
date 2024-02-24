@@ -44,11 +44,13 @@ class SitemapScraper(BaseScraper):
     def fetch_main_sitemap(self):
         self.navigate_to_url(self.main_sitemap_url)
         links = self.driver.find_elements(By.TAG_NAME, "a")
-        return [
+        post_sitemaps = [
             url
             for link in links
             if "post-sitemap" in (url := link.get_attribute("href"))
         ]
+        logging.info("Found %s post sitemaps.", len(post_sitemaps))
+        return post_sitemaps
 
     def fetch_post_sitemaps(self, sitemaps, max_urls=None):
         article_urls = []
@@ -67,7 +69,7 @@ class SitemapScraper(BaseScraper):
             article_urls = article_urls[:max_urls]
         return article_urls
 
-    def get_article_urls(self, max_urls=None):
+    def scrape_sitemap(self, max_urls=None):
         logging.info("Fetching article URLs.")
         post_sitemaps = self.fetch_main_sitemap()
         if not post_sitemaps:
@@ -81,48 +83,51 @@ class SitemapScraper(BaseScraper):
 class RapplerScraper(BaseScraper):
     ARTICLE_TITLE_XPATH = "//h1[contains(@class,'post-single__title')]"
     ARTICLE_CONTENT_XPATH = "//div[contains(@class,'post-single__content')]"
-    VOTES_CONTAINER_XPATH = "//div[contains(@class,'xa3V2iPvKCrXH2KVimTv-g==')]"
-    SEE_VOTES_XPATH = "//div[contains(@class,'AOhvJlN4Z5TsLqKZb1kSBw==')]"
+    MOODS_CONTAINER_XPATH = "//div[contains(@class,'xa3V2iPvKCrXH2KVimTv-g==')]"
+    SEE_MOODS_XPATH = "//div[contains(@class,'AOhvJlN4Z5TsLqKZb1kSBw==')]"
 
     def __init__(self, article_url):
         super().__init__()
         self.article_url = article_url
 
-    def collect_votes_data(self):
-        votes_container = self.wait_for_element(self.VOTES_CONTAINER_XPATH)
-        votes = [
+    def format_mood_name(self, name):
+        return "_".join(name.lower().replace("feel", "").split())
+
+    def collect_moodmeter_data(self):
+        moods_container = self.wait_for_element(self.MOODS_CONTAINER_XPATH)
+        moods = [
+            self.format_mood_name(heading.text)
+            for heading in moods_container.find_elements(By.TAG_NAME, "h4")
+        ]
+        percentages = [
             span.text
-            for span in votes_container.find_elements(By.TAG_NAME, "span")
+            for span in moods_container.find_elements(By.TAG_NAME, "span")
             if "%" in span.text
         ]
-        moods = [
-            heading.text
-            for heading in votes_container.find_elements(By.TAG_NAME, "h4")
-        ]
-        return dict(zip(moods, votes))
+        return dict(zip(moods, percentages))
 
     def scrape_article(self):
         logging.info("Scraping article: %s", self.article_url)
         self.navigate_to_url(self.article_url)
-        data = {}
+        article_data = {}
 
         try:
             title = self.wait_for_element(self.ARTICLE_TITLE_XPATH).text
             content = self.wait_for_element(self.ARTICLE_CONTENT_XPATH).text
 
             try:
-                self.click_element_via_js(self.SEE_VOTES_XPATH)
+                self.click_element_via_js(self.SEE_MOODS_XPATH)
             except:
                 self.click_element_via_js(self.VOTE_DIV_XPATH)
                 self.click_element_via_js(self.HAPPY_DIV_XPATH)
 
-            votes_data = self.collect_votes_data()
+            moods = self.collect_moodmeter_data()
 
-            data = {
+            article_data = {
                 "title": title,
                 "url": self.article_url,
                 "content": content,
-                "votes": votes_data,
+                "moods": moods,
             }
         except Exception as e:
             logging.error("Failed to scrape article: %s", e)
@@ -130,7 +135,7 @@ class RapplerScraper(BaseScraper):
             self.driver.quit()
             logging.info("Finished scraping article.")
 
-        return data
+        return article_data
 
 
 def parse_arguments():
@@ -157,7 +162,7 @@ if __name__ == "__main__":
 
     sitemap_url = "https://www.rappler.com/sitemap_index.xml"
     sitemap_scraper = SitemapScraper(sitemap_url)
-    article_urls = sitemap_scraper.get_article_urls(max_urls=args.limit_article)
+    article_urls = sitemap_scraper.scrape_sitemap(max_urls=args.limit_article)
 
     data_list = []
     for url in article_urls:
@@ -170,5 +175,5 @@ if __name__ == "__main__":
         except Exception as e:
             logging.error(f"Failed to scrape {url}: {e}")
 
-    with open("rappler_data.json", "w", encoding="utf-8") as f:
-        json.dump(data_list, f)
+    with open("rappler_data.json", "w", encoding="utf-8") as output:
+        json.dump(data_list, output)
