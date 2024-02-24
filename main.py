@@ -1,3 +1,4 @@
+import argparse
 import json
 import logging
 import time
@@ -13,6 +14,20 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
+
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+        description="Scrape articles from Rappler website.",
+    )
+    parser.add_argument(
+        "--limit-article",
+        type=int,
+        metavar="N",
+        help="limit the number of articles to scrape",
+        default=None,
+    )
+    return parser.parse_args()
 
 
 class SitemapScraper:
@@ -193,9 +208,11 @@ class RapplerScraper:
 
 
 if __name__ == "__main__":
+    args = parse_arguments()
+
     sitemap_url = "https://www.rappler.com/sitemap_index.xml"
     sitemap_scraper = SitemapScraper(sitemap_url)
-    article_urls = sitemap_scraper.get_article_urls(10)
+    article_urls = sitemap_scraper.get_article_urls(max_urls=args.limit_article)
 
     data_list = []
     for url in article_urls:
