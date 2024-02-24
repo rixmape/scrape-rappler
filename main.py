@@ -3,8 +3,6 @@ import json
 import logging
 import time
 
-import requests
-from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
@@ -33,24 +31,20 @@ def parse_arguments():
 class SitemapScraper:
     def __init__(self, main_sitemap_url):
         self.main_sitemap_url = main_sitemap_url
+        options = webdriver.ChromeOptions()
+        options.add_argument("--headless")
+        self.driver = webdriver.Chrome(options=options)
         logging.info("SitemapScraper initialized with %s", main_sitemap_url)
 
     def fetch_main_sitemap(self):
         """Fetches the main sitemap and extracts the post sitemaps."""
         logging.info("Fetching main sitemap")
-        try:
-            response = requests.get(self.main_sitemap_url)
-            response.raise_for_status()
-        except requests.exceptions.RequestException as e:
-            logging.error("Failed to fetch main sitemap: %s", e)
-            return []
-
-        soup = BeautifulSoup(response.content, "xml")
-        sitemap_tags = soup.find_all("sitemap")
+        self.driver.get(self.main_sitemap_url)
+        sitemap_tags = self.driver.find_elements(By.TAG_NAME, "a")
         post_sitemaps = [
-            tag.find("loc").text
+            tag.get_attribute("href")
             for tag in sitemap_tags
-            if "post-sitemap" in tag.find("loc").text
+            if "post-sitemap" in tag.get_attribute("href")
         ]
 
         logging.info(
@@ -60,22 +54,19 @@ class SitemapScraper:
         return post_sitemaps
 
     def fetch_post_sitemaps(self, sitemaps, max_urls=None):
-        """Fetches the post sitemaps and extracts the article URLs up to a specified limit."""
+        """Fetches post sitemaps and extracts article URLs."""
         article_urls = []
         for sitemap_url in sitemaps:
             if max_urls is not None and len(article_urls) >= max_urls:
                 break  # Stop if desired number of URLs is reached
 
             logging.info("Fetching post sitemap from %s", sitemap_url)
-            try:
-                response = requests.get(sitemap_url)
-                response.raise_for_status()
-            except requests.exceptions.RequestException as e:
-                logging.error("Failed to fetch post sitemap: %s", e)
-                continue  # Skip to next sitemap
-
-            soup = BeautifulSoup(response.content, "xml")
-            urls = [url.loc.text for url in soup.findAll("url")]
+            self.driver.get(sitemap_url)
+            table = self.driver.find_element(By.ID, "sitemap")
+            urls = [
+                a.get_attribute("href")
+                for a in table.find_elements(By.TAG_NAME, "a")
+            ]
             article_urls.extend(
                 urls[: max_urls - len(article_urls)] if max_urls else urls
             )
@@ -91,7 +82,7 @@ class SitemapScraper:
 
     def get_article_urls(self, max_urls=None):
         """Fetches all article URLs from the main and post sitemaps."""
-        logging.info("Starting the process to fetch all article URLs.")
+        logging.info("Fetching article URLs.")
         post_sitemaps = self.fetch_main_sitemap()
         if not post_sitemaps:
             logging.error("No post sitemaps found.")
