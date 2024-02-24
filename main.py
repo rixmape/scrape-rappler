@@ -184,16 +184,21 @@ class RapplerScraper:
 
         self.driver.quit()
         logging.info("Finished scraping article.")
-        return {"title": title, "content": content, "votes": votes_data}
+        return {
+            "title": title,
+            "url": self.article_url,
+            "content": content,
+            "votes": votes_data,
+        }
 
 
 if __name__ == "__main__":
     sitemap_url = "https://www.rappler.com/sitemap_index.xml"
     sitemap_scraper = SitemapScraper(sitemap_url)
-    article_urls = sitemap_scraper.get_article_urls(1)
+    article_urls = sitemap_scraper.get_article_urls(10)
 
     data_list = []
-    for url in article_urls[:1]:
+    for url in article_urls:
         try:
             scraper = RapplerScraper(url)
             data = scraper.scrape_article()
