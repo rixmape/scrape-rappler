@@ -153,21 +153,27 @@ def parse_arguments():
         help="limit the number of articles to scrape",
         default=None,
     )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+        help="set the logging level",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
+    command_line_args = parse_arguments()
+
     logging.basicConfig(
-        level=logging.INFO,
+        level=command_line_args.log_level,
         format="%(asctime)s - %(levelname)s - %(message)s",
     )
-
-    args = parse_arguments()
 
     sitemap_url = "https://www.rappler.com/sitemap_index.xml"
     sitemap_scraper = SitemapScraper(sitemap_url)
     article_urls = sitemap_scraper.scrape_sitemap(
-        max_urls=args.limit_article,
+        max_urls=command_line_args.limit_article,
         ignore_urls=[
             "https://www.rappler.com/latest/",  # Just a list of titles
         ],
