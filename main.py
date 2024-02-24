@@ -180,10 +180,14 @@ class RapplerScraper:
         logging.info("Starting to scrape article.")
         self.setup()
         title = self.get_element_text(self.ARTICLE_TITLE_XPATH)
-        content = self.get_element_text(self.ARTICLE_CONTENT_XPATH)
+        if not title:
+            logging.error("Failed to collect title.")
+            self.driver.quit()
+            return {}
 
-        if not title or not content:
-            logging.error("Failed to collect title or content.")
+        content = self.get_element_text(self.ARTICLE_CONTENT_XPATH)
+        if not content:
+            logging.error("Failed to collect content.")
             self.driver.quit()
             return {}
 
