@@ -97,13 +97,10 @@ class RapplerScraper(BaseScraper):
         super().__init__()
         self.article_url = article_url
 
-    def format_mood_name(self, name):
-        return "_".join(name.lower().replace("feel", "").split())
-
     def collect_moodmeter_data(self):
         moods_container = self.wait_for_element(self.MOODS_CONTAINER_XPATH)
         moods = [
-            self.format_mood_name(heading.text)
+            heading.text
             for heading in moods_container.find_elements(By.TAG_NAME, "h4")
         ]
         percentages = [
