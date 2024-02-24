@@ -50,6 +50,24 @@ def scrape_article(article_url):
     driver = initialize_driver(article_url)
 
     try:
+        title = driver.find_element(
+            By.CLASS_NAME,
+            "post-single__title",
+        ).text
+    except Exception as e:
+        print(f"An error occurred while fetching the title: {e}")
+        title = None
+
+    try:
+        content = driver.find_element(
+            By.CLASS_NAME,
+            "post-single__content",
+        ).text
+    except Exception as e:
+        print(f"An error occurred while fetching the content: {e}")
+        content = None
+
+    try:
         # Attempt to directly access votes, if fails, try to cast a vote.
         try:
             see_votes = wait_for_element(
@@ -70,7 +88,13 @@ def scrape_article(article_url):
             )
             click_element(driver, happy_div)
 
-        return collect_votes_data(driver)
+        votes_data = collect_votes_data(driver)
+
+        return {
+            "title": title,
+            "content": content,
+            "votes": votes_data,
+        }
     except Exception as e:
         print(f"An error occurred: {e}")
     finally:
