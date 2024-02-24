@@ -3,17 +3,143 @@ import json
 import logging
 import time
 
-import requests
-from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s",
-)
+
+class BaseScraper:
+    def __init__(self):
+        chrome_options = webdriver.ChromeOptions()
+        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("log-level=3")
+        self.driver = webdriver.Chrome(options=chrome_options)
+
+    def navigate_to_url(self, url):
+        logging.info("Navigating to URL: %s", url)
+        self.driver.get(url)
+
+    def wait_for_element(self, identifier, by=By.XPATH, wait_time=10):
+        logging.info("Waiting for element: %s", identifier)
+        return WebDriverWait(self.driver, wait_time).until(
+            EC.presence_of_element_located((by, identifier))
+        )
+
+    def click_element_via_js(self, identifier, by=By.XPATH):
+        element = self.wait_for_element(identifier, by=by)
+        self.driver.execute_script("arguments[0].click();", element)
+
+    def quit_driver(self):
+        self.driver.quit()
+
+
+class SitemapScraper(BaseScraper):
+    BASE_URL = "https://www.rappler.com"
+
+    def __init__(self, main_sitemap_url):
+        super().__init__()
+        self.main_sitemap_url = main_sitemap_url
+
+    def fetch_main_sitemap(self):
+        self.navigate_to_url(self.main_sitemap_url)
+        links = self.driver.find_elements(By.TAG_NAME, "a")
+        post_sitemaps = [
+            url
+            for link in links
+            if "post-sitemap" in (url := link.get_attribute("href"))
+        ]
+        logging.info("Found %s post sitemaps.", len(post_sitemaps))
+        return post_sitemaps
+
+    def fetch_post_sitemaps(self, sitemaps, max_urls=None, ignore_urls=None):
+        if ignore_urls is None:
+            ignore_urls = []
+        article_urls = []
+        for sitemap in sitemaps:
+            if max_urls is not None and len(article_urls) >= max_urls:
+                logging.info("Reached max URLs.")
+                break
+            self.navigate_to_url(sitemap)
+            urls = [
+                url
+                for a in self.driver.find_elements(By.TAG_NAME, "a")
+                if (url := a.get_attribute("href")).startswith(self.BASE_URL)
+                and url not in ignore_urls
+            ]
+            article_urls.extend(urls)
+        if max_urls is not None:
+            article_urls = article_urls[:max_urls]
+        return article_urls
+
+    def scrape_sitemap(self, max_urls=None, ignore_urls=None):
+        logging.info("Fetching article URLs.")
+        post_sitemaps = self.fetch_main_sitemap()
+        if not post_sitemaps:
+            logging.error("No post sitemaps found.")
+            return []
+        urls = self.fetch_post_sitemaps(
+            post_sitemaps,
+            max_urls=max_urls,
+            ignore_urls=ignore_urls,
+        )
+        logging.info("Fetched %s article URLs.", len(urls))
+        return urls
+
+
+class RapplerScraper(BaseScraper):
+    ARTICLE_TITLE_XPATH = "//h1[contains(@class,'post-single__title')]"
+    ARTICLE_CONTENT_XPATH = "//div[contains(@class,'post-single__content')]"
+    MOODS_CONTAINER_XPATH = "//div[contains(@class,'xa3V2iPvKCrXH2KVimTv-g==')]"
+    SEE_MOODS_XPATH = "//div[contains(@class,'AOhvJlN4Z5TsLqKZb1kSBw==')]"
+
+    def __init__(self, article_url):
+        super().__init__()
+        self.article_url = article_url
+
+    def collect_moodmeter_data(self):
+        moods_container = self.wait_for_element(self.MOODS_CONTAINER_XPATH)
+        moods = [
+            heading.text
+            for heading in moods_container.find_elements(By.TAG_NAME, "h4")
+        ]
+        percentages = [
+            span.text
+            for span in moods_container.find_elements(By.TAG_NAME, "span")
+            if "%" in span.text
+        ]
+        return dict(zip(moods, percentages))
+
+    def scrape_article(self):
+        logging.info("Scraping article: %s", self.article_url)
+        self.navigate_to_url(self.article_url)
+        article_data = {}
+
+        try:
+            title = self.wait_for_element(self.ARTICLE_TITLE_XPATH).text
+            content = self.wait_for_element(self.ARTICLE_CONTENT_XPATH).text
+
+            try:
+                self.click_element_via_js(self.SEE_MOODS_XPATH)
+            except:
+                self.click_element_via_js(self.VOTE_DIV_XPATH)
+                self.click_element_via_js(self.HAPPY_DIV_XPATH)
+
+            moods = self.collect_moodmeter_data()
+
+            article_data = {
+                "title": title,
+                "url": self.article_url,
+                "content": content,
+                "moods": moods,
+            }
+        except Exception as e:
+            logging.error("Failed to scrape article: %s", e)
+        finally:
+            self.driver.quit()
+            logging.info("Finished scraping article.")
+
+        return article_data
 
 
 def parse_arguments():
@@ -27,202 +153,42 @@ def parse_arguments():
         help="limit the number of articles to scrape",
         default=None,
     )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        default="INFO",
+        help="set the logging level",
+    )
     return parser.parse_args()
 
 
-class SitemapScraper:
-    def __init__(self, main_sitemap_url):
-        self.main_sitemap_url = main_sitemap_url
-        logging.info(
-            "SitemapScraper instance created with main sitemap URL: %s",
-            main_sitemap_url,
-        )
-
-    def fetch_main_sitemap(self):
-        """Fetches the main sitemap and extracts the post sitemaps."""
-        logging.info(
-            "Fetching main sitemap from %s",
-            self.main_sitemap_url,
-        )
-        try:
-            response = requests.get(self.main_sitemap_url)
-            response.raise_for_status()
-        except requests.exceptions.RequestException as e:
-            logging.error("Failed to fetch the main sitemap: %s", e)
-            return []
-
-        soup = BeautifulSoup(response.content, "xml")
-        sitemap_tags = soup.find_all("sitemap")
-        post_sitemaps = [
-            tag.find("loc").text
-            for tag in sitemap_tags
-            if "post-sitemap" in tag.find("loc").text
-        ]
-
-        logging.info(
-            "Successfully fetched and parsed main sitemap."
-            " Post sitemaps found: %d",
-            len(post_sitemaps),
-        )
-        return post_sitemaps
-
-    def fetch_post_sitemaps(self, sitemaps, max_urls=None):
-        """Fetches the post sitemaps and extracts the article URLs up to a specified limit."""
-        article_urls = []
-        for sitemap_url in sitemaps:
-            if max_urls is not None and len(article_urls) >= max_urls:
-                break  # Stop if we have reached the desired number of URLs
-
-            logging.info("Fetching post sitemap from %s", sitemap_url)
-            try:
-                response = requests.get(sitemap_url)
-                response.raise_for_status()
-            except requests.exceptions.RequestException as e:
-                logging.error("Failed to fetch the post sitemap: %s", e)
-                continue  # Skip to the next sitemap
-
-            soup = BeautifulSoup(response.content, "xml")
-            urls = [url.loc.text for url in soup.findAll("url")]
-            article_urls.extend(
-                urls[: max_urls - len(article_urls)] if max_urls else urls
-            )
-
-            logging.info(
-                "Successfully fetched and parsed post sitemap."
-                " Articles found: %d",
-                len(urls),
-            )
-
-        article_urls = list(set(article_urls))
-        logging.info(
-            "Total unique article URLs extracted: %d",
-            len(article_urls),
-        )
-        return article_urls
-
-    def get_article_urls(self, max_urls=None):
-        """Main function to fetch article URLs, optionally up to a maximum number."""
-        logging.info("Starting the process to fetch all article URLs.")
-        post_sitemaps = self.fetch_main_sitemap()
-        if not post_sitemaps:
-            logging.error("No post sitemaps found.")
-            return []
-        return self.fetch_post_sitemaps(post_sitemaps, max_urls=max_urls)
-
-
-class RapplerScraper:
-    ARTICLE_TITLE_XPATH = "//h1[contains(@class,'post-single__title')]"
-    ARTICLE_CONTENT_XPATH = "//div[contains(@class,'post-single__content')]"
-    VOTES_CONTAINER_XPATH = "//div[contains(@class,'xa3V2iPvKCrXH2KVimTv-g==')]"
-    SEE_VOTES_XPATH = "//div[contains(@class,'AOhvJlN4Z5TsLqKZb1kSBw==')]"
-    VOTE_DIV_XPATH = "//div[contains(@class,'i1IMtjULF3BKu3lB0m1ilg==')]"
-    HAPPY_DIV_XPATH = "//div[contains(@class,'mood-happy')]"
-
-    def __init__(self, article_url):
-        self.article_url = article_url
-        self.driver = webdriver.Chrome()
-        logging.info(
-            "RapplerScraper instance created with article URL: %s",
-            article_url,
-        )
-
-    def setup(self):
-        """Navigate to the article URL."""
-        self.driver.get(self.article_url)
-        logging.info("Navigated to the article URL: %s", self.article_url)
-
-    def wait_for(self, identifier, wait_time=10):
-        """Wait for a specific element to be present."""
-        logging.info("Waiting for element with identifier: %s", identifier)
-        return WebDriverWait(self.driver, wait_time).until(
-            EC.presence_of_element_located((By.XPATH, identifier))
-        )
-
-    def click_element_via_js(self, identifier):
-        """Clicks an element using JavaScript execution."""
-        logging.info("Clicking element with identifier: %s", identifier)
-        element = self.wait_for(identifier)
-        self.driver.execute_script("arguments[0].click();", element)
-
-    def get_element_text(self, identifier, default=None):
-        """Attempts to get an element's text, returning a default value if an error occurs."""
-        logging.info("Getting text of element with identifier: %s", identifier)
-        try:
-            return self.wait_for(identifier).text
-        except:
-            logging.error(
-                "Failed to get text of element with identifier: %s",
-                identifier,
-            )
-            return default
-
-    def collect_votes_data(self):
-        """Collects and formats votes data from the webpage."""
-        logging.info("Collecting votes data.")
-        votes_container = self.wait_for(self.VOTES_CONTAINER_XPATH)
-
-        votes = [
-            span.text
-            for span in votes_container.find_elements(By.TAG_NAME, "span")
-            if "%" in span.text
-        ]
-        moods = [
-            heading.text
-            for heading in votes_container.find_elements(By.TAG_NAME, "h4")
-        ]
-
-        return dict(zip(moods, votes))
-
-    def scrape_article(self):
-        """Main function to scrape the article's title, content, and votes data."""
-        logging.info("Starting to scrape article.")
-        self.setup()
-        title = self.get_element_text(self.ARTICLE_TITLE_XPATH)
-        content = self.get_element_text(self.ARTICLE_CONTENT_XPATH)
-
-        if not title or not content:
-            logging.error("Failed to collect title or content.")
-            self.driver.quit()
-            return {}
-
-        try:
-            try:
-                self.click_element_via_js(self.SEE_VOTES_XPATH)
-            except:
-                self.click_element_via_js(self.VOTE_DIV_XPATH)
-                self.click_element_via_js(self.HAPPY_DIV_XPATH)
-
-            votes_data = self.collect_votes_data()
-        except Exception as e:
-            logging.error("Failed to collect votes data: %s", e)
-            votes_data = {}
-
-        self.driver.quit()
-        logging.info("Finished scraping article.")
-        return {
-            "title": title,
-            "url": self.article_url,
-            "content": content,
-            "votes": votes_data,
-        }
-
-
 if __name__ == "__main__":
-    args = parse_arguments()
+    command_line_args = parse_arguments()
+
+    logging.basicConfig(
+        level=command_line_args.log_level,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+    )
 
     sitemap_url = "https://www.rappler.com/sitemap_index.xml"
     sitemap_scraper = SitemapScraper(sitemap_url)
-    article_urls = sitemap_scraper.get_article_urls(max_urls=args.limit_article)
+    article_urls = sitemap_scraper.scrape_sitemap(
+        max_urls=command_line_args.limit_article,
+        ignore_urls=[
+            "https://www.rappler.com/latest/",  # Just a list of titles
+        ],
+    )
 
     data_list = []
     for url in article_urls:
         try:
             scraper = RapplerScraper(url)
             data = scraper.scrape_article()
-            data_list.append(data)
-            time.sleep(1)  # Delay to avoid getting blocked
+            if data:
+                data_list.append(data)
+            time.sleep(1)
         except Exception as e:
-            print(f"Failed to scrape {url}: {e}")
+            logging.error(f"Failed to scrape {url}: {e}")
 
-    with open("rappler_data.json", "w", encoding="utf-8") as f:
-        json.dump(data_list, f)
+    with open("rappler_data.json", "w", encoding="utf-8") as output:
+        json.dump(data_list, output)
