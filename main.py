@@ -33,22 +33,16 @@ def parse_arguments():
 class SitemapScraper:
     def __init__(self, main_sitemap_url):
         self.main_sitemap_url = main_sitemap_url
-        logging.info(
-            "SitemapScraper instance created with main sitemap URL: %s",
-            main_sitemap_url,
-        )
+        logging.info("SitemapScraper initialized with %s", main_sitemap_url)
 
     def fetch_main_sitemap(self):
         """Fetches the main sitemap and extracts the post sitemaps."""
-        logging.info(
-            "Fetching main sitemap from %s",
-            self.main_sitemap_url,
-        )
+        logging.info("Fetching main sitemap")
         try:
             response = requests.get(self.main_sitemap_url)
             response.raise_for_status()
         except requests.exceptions.RequestException as e:
-            logging.error("Failed to fetch the main sitemap: %s", e)
+            logging.error("Failed to fetch main sitemap: %s", e)
             return []
 
         soup = BeautifulSoup(response.content, "xml")
@@ -60,8 +54,7 @@ class SitemapScraper:
         ]
 
         logging.info(
-            "Successfully fetched and parsed main sitemap."
-            " Post sitemaps found: %d",
+            "Fetched and parsed main sitemap. Post sitemaps found: %d",
             len(post_sitemaps),
         )
         return post_sitemaps
@@ -71,15 +64,15 @@ class SitemapScraper:
         article_urls = []
         for sitemap_url in sitemaps:
             if max_urls is not None and len(article_urls) >= max_urls:
-                break  # Stop if we have reached the desired number of URLs
+                break  # Stop if desired number of URLs is reached
 
             logging.info("Fetching post sitemap from %s", sitemap_url)
             try:
                 response = requests.get(sitemap_url)
                 response.raise_for_status()
             except requests.exceptions.RequestException as e:
-                logging.error("Failed to fetch the post sitemap: %s", e)
-                continue  # Skip to the next sitemap
+                logging.error("Failed to fetch post sitemap: %s", e)
+                continue  # Skip to next sitemap
 
             soup = BeautifulSoup(response.content, "xml")
             urls = [url.loc.text for url in soup.findAll("url")]
@@ -88,20 +81,16 @@ class SitemapScraper:
             )
 
             logging.info(
-                "Successfully fetched and parsed post sitemap."
-                " Articles found: %d",
+                "Fetched and parsed post sitemap. Articles found: %d",
                 len(urls),
             )
 
         article_urls = list(set(article_urls))
-        logging.info(
-            "Total unique article URLs extracted: %d",
-            len(article_urls),
-        )
+        logging.info("Total unique articles found: %d", len(article_urls))
         return article_urls
 
     def get_article_urls(self, max_urls=None):
-        """Main function to fetch article URLs, optionally up to a maximum number."""
+        """Fetches all article URLs from the main and post sitemaps."""
         logging.info("Starting the process to fetch all article URLs.")
         post_sitemaps = self.fetch_main_sitemap()
         if not post_sitemaps:
@@ -123,40 +112,25 @@ class RapplerScraper:
         options = webdriver.ChromeOptions()
         options.add_argument("--headless")
         self.driver = webdriver.Chrome(options=options)
-        logging.info(
-            "RapplerScraper instance created with article URL: %s",
-            article_url,
-        )
+        logging.info("RapplerScraper initialized with %s", article_url)
 
     def setup(self):
         """Navigate to the article URL."""
         self.driver.get(self.article_url)
-        logging.info("Navigated to the article URL: %s", self.article_url)
+        logging.info("Navigated to article.")
 
     def wait_for(self, identifier, wait_time=10):
         """Wait for a specific element to be present."""
-        logging.info("Waiting for element with identifier: %s", identifier)
+        logging.info("Waiting for element %s", identifier)
         return WebDriverWait(self.driver, wait_time).until(
             EC.presence_of_element_located((By.XPATH, identifier))
         )
 
     def click_element_via_js(self, identifier):
         """Clicks an element using JavaScript execution."""
-        logging.info("Clicking element with identifier: %s", identifier)
+        logging.info("Clicking element %s", identifier)
         element = self.wait_for(identifier)
         self.driver.execute_script("arguments[0].click();", element)
-
-    def get_element_text(self, identifier, default=None):
-        """Attempts to get an element's text, returning a default value if an error occurs."""
-        logging.info("Getting text of element with identifier: %s", identifier)
-        try:
-            return self.wait_for(identifier).text
-        except:
-            logging.error(
-                "Failed to get text of element with identifier: %s",
-                identifier,
-            )
-            return default
 
     def collect_votes_data(self):
         """Collects and formats votes data from the webpage."""
@@ -176,22 +150,14 @@ class RapplerScraper:
         return dict(zip(moods, votes))
 
     def scrape_article(self):
-        """Main function to scrape the article's title, content, and votes data."""
         logging.info("Starting to scrape article.")
         self.setup()
-        title = self.get_element_text(self.ARTICLE_TITLE_XPATH)
-        if not title:
-            logging.error("Failed to collect title.")
-            self.driver.quit()
-            return {}
-
-        content = self.get_element_text(self.ARTICLE_CONTENT_XPATH)
-        if not content:
-            logging.error("Failed to collect content.")
-            self.driver.quit()
-            return {}
+        data = {}
 
         try:
+            title = self.wait_for(self.ARTICLE_TITLE_XPATH).text
+            content = self.wait_for(self.ARTICLE_CONTENT_XPATH).text
+
             try:
                 self.click_element_via_js(self.SEE_VOTES_XPATH)
             except:
@@ -199,18 +165,20 @@ class RapplerScraper:
                 self.click_element_via_js(self.HAPPY_DIV_XPATH)
 
             votes_data = self.collect_votes_data()
-        except Exception as e:
-            logging.error("Failed to collect votes data: %s", e)
-            votes_data = {}
 
-        self.driver.quit()
-        logging.info("Finished scraping article.")
-        return {
-            "title": title,
-            "url": self.article_url,
-            "content": content,
-            "votes": votes_data,
-        }
+            data = {
+                "title": title,
+                "url": self.article_url,
+                "content": content,
+                "votes": votes_data,
+            }
+        except Exception as e:
+            logging.error("Failed to scrape article: %s", e)
+        finally:
+            self.driver.quit()
+            logging.info("Finished scraping article.")
+
+        return data
 
 
 if __name__ == "__main__":
@@ -225,7 +193,8 @@ if __name__ == "__main__":
         try:
             scraper = RapplerScraper(url)
             data = scraper.scrape_article()
-            data_list.append(data)
+            if data:
+                data_list.append(data)
             time.sleep(1)  # Delay to avoid getting blocked
         except Exception as e:
             print(f"Failed to scrape {url}: {e}")
