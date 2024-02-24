@@ -1,3 +1,4 @@
+import json
 import time
 
 import requests
@@ -115,11 +116,15 @@ if __name__ == "__main__":
     sitemap_scraper = SitemapScraper(sitemap_url)
     article_urls = sitemap_scraper.get_article_urls()
 
+    data_list = []
     for url in article_urls[:1]:
         try:
             scraper = RapplerScraper(url)
             data = scraper.scrape_article()
-            print(data)
+            data_list.append(data)
             time.sleep(1)  # Delay to avoid getting blocked
         except Exception as e:
             print(f"Failed to scrape {url}: {e}")
+
+    with open("rappler_data.json", "w", encoding="utf-8") as f:
+        json.dump(data_list, f)
