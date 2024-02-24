@@ -120,7 +120,9 @@ class RapplerScraper:
 
     def __init__(self, article_url):
         self.article_url = article_url
-        self.driver = webdriver.Chrome()
+        options = webdriver.ChromeOptions()
+        options.add_argument("--headless")
+        self.driver = webdriver.Chrome(options=options)
         logging.info(
             "RapplerScraper instance created with article URL: %s",
             article_url,
