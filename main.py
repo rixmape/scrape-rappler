@@ -106,31 +106,44 @@ class RapplerScraper:
     def __init__(self, article_url):
         self.article_url = article_url
         self.driver = webdriver.Chrome()
+        logging.info(
+            "RapplerScraper instance created with article URL: %s",
+            article_url,
+        )
 
     def setup(self):
         """Navigate to the article URL."""
         self.driver.get(self.article_url)
+        logging.info("Navigated to the article URL: %s", self.article_url)
 
     def wait_for(self, identifier, wait_time=10):
         """Wait for a specific element to be present."""
+        logging.info("Waiting for element with identifier: %s", identifier)
         return WebDriverWait(self.driver, wait_time).until(
             EC.presence_of_element_located((By.XPATH, identifier))
         )
 
     def click_element_via_js(self, identifier):
         """Clicks an element using JavaScript execution."""
+        logging.info("Clicking element with identifier: %s", identifier)
         element = self.wait_for(identifier)
         self.driver.execute_script("arguments[0].click();", element)
 
     def get_element_text(self, identifier, default=None):
         """Attempts to get an element's text, returning a default value if an error occurs."""
+        logging.info("Getting text of element with identifier: %s", identifier)
         try:
             return self.wait_for(identifier).text
         except:
+            logging.error(
+                "Failed to get text of element with identifier: %s",
+                identifier,
+            )
             return default
 
     def collect_votes_data(self):
         """Collects and formats votes data from the webpage."""
+        logging.info("Collecting votes data.")
         votes_container = self.wait_for(self.VOTES_CONTAINER_XPATH)
 
         votes = [
@@ -147,6 +160,7 @@ class RapplerScraper:
 
     def scrape_article(self):
         """Main function to scrape the article's title, content, and votes data."""
+        logging.info("Starting to scrape article.")
         self.setup()
         title = self.get_element_text(self.ARTICLE_TITLE_XPATH)
         content = self.get_element_text(self.ARTICLE_CONTENT_XPATH)
@@ -160,10 +174,11 @@ class RapplerScraper:
 
             votes_data = self.collect_votes_data()
         except Exception as e:
-            print(f"An error occurred while collecting votes data: {e}")
+            logging.error("Failed to collect votes data: %s", e)
             votes_data = {}
 
         self.driver.quit()
+        logging.info("Finished scraping article.")
         return {"title": title, "content": content, "votes": votes_data}
 
 
