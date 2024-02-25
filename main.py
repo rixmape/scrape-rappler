@@ -169,12 +169,6 @@ def parse_arguments():
         default=None,
     )
     parser.add_argument(
-        "--log-level",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
-        default="INFO",
-        help="set the logging level",
-    )
-    parser.add_argument(
         "--enable-multiprocessing",
         action="store_true",
         help="enable multiprocessing for scraping",
@@ -182,7 +176,15 @@ def parse_arguments():
     return parser.parse_args()
 
 
+def setup_logging():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(levelname)s - %(message)s",
+    )
+
+
 def scrape_and_save_article(url):
+    setup_logging()
     scraper = RapplerScraper(url)
     data = scraper.scrape_article()
     save_to_json(data)
@@ -198,11 +200,7 @@ def save_to_json(data):
 
 if __name__ == "__main__":
     command_line_args = parse_arguments()
-
-    logging.basicConfig(
-        level=command_line_args.log_level,
-        format="%(asctime)s - %(levelname)s - %(message)s",
-    )
+    setup_logging()
 
     os.makedirs("out", exist_ok=True)
 
