@@ -1,7 +1,9 @@
 import argparse
+import hashlib
 import json
 import logging
-import time
+import os
+from multiprocessing import Pool, cpu_count
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -14,6 +16,11 @@ class BaseScraper:
         chrome_options = webdriver.ChromeOptions()
         chrome_options.add_argument("--headless")
         chrome_options.add_argument("log-level=3")
+        chrome_options.add_argument("--disable-extensions")
+
+        prefs = {"profile.managed_default_content_settings.images": 2}
+        chrome_options.add_experimental_option("prefs", prefs)
+
         self.driver = webdriver.Chrome(options=chrome_options)
 
     def navigate_to_url(self, url):
@@ -73,17 +80,23 @@ class SitemapScraper(BaseScraper):
         return article_urls
 
     def scrape_sitemap(self, max_urls=None, ignore_urls=None):
-        logging.info("Fetching article URLs.")
-        post_sitemaps = self.fetch_main_sitemap()
-        if not post_sitemaps:
-            logging.error("No post sitemaps found.")
+        try:
+            logging.info("Fetching article URLs.")
+            post_sitemaps = self.fetch_main_sitemap()
+            if not post_sitemaps:
+                logging.error("No post sitemaps found.")
+                return []
+            urls = self.fetch_post_sitemaps(
+                post_sitemaps,
+                max_urls=max_urls,
+                ignore_urls=ignore_urls,
+            )
+            logging.info("Fetched %s article URLs.", len(urls))
+        except Exception as e:
+            logging.error("Failed to scrape sitemap: %s", e)
             return []
-        urls = self.fetch_post_sitemaps(
-            post_sitemaps,
-            max_urls=max_urls,
-            ignore_urls=ignore_urls,
-        )
-        logging.info("Fetched %s article URLs.", len(urls))
+        finally:
+            self.quit_driver()
         return urls
 
 
@@ -92,6 +105,8 @@ class RapplerScraper(BaseScraper):
     ARTICLE_CONTENT_XPATH = "//div[contains(@class,'post-single__content')]"
     MOODS_CONTAINER_XPATH = "//div[contains(@class,'xa3V2iPvKCrXH2KVimTv-g==')]"
     SEE_MOODS_XPATH = "//div[contains(@class,'AOhvJlN4Z5TsLqKZb1kSBw==')]"
+    VOTE_DIV_XPATH = "//div[contains(@class,'i1IMtjULF3BKu3lB0m1ilg==')]"
+    HAPPY_DIV_XPATH = "//div[contains(@class,'mood-happy')]"
 
     def __init__(self, article_url):
         super().__init__()
@@ -159,7 +174,26 @@ def parse_arguments():
         default="INFO",
         help="set the logging level",
     )
+    parser.add_argument(
+        "--enable-multiprocessing",
+        action="store_true",
+        help="enable multiprocessing for scraping",
+    )
     return parser.parse_args()
+
+
+def scrape_and_save_article(url):
+    scraper = RapplerScraper(url)
+    data = scraper.scrape_article()
+    save_to_json(data)
+
+
+def save_to_json(data):
+    url = data["url"]
+    url_hash = hashlib.sha256(url.encode()).hexdigest()
+    filename = os.path.join("out", f"{url_hash}.json")
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(data, f)
 
 
 if __name__ == "__main__":
@@ -170,6 +204,8 @@ if __name__ == "__main__":
         format="%(asctime)s - %(levelname)s - %(message)s",
     )
 
+    os.makedirs("out", exist_ok=True)
+
     sitemap_url = "https://www.rappler.com/sitemap_index.xml"
     sitemap_scraper = SitemapScraper(sitemap_url)
     article_urls = sitemap_scraper.scrape_sitemap(
@@ -179,16 +215,9 @@ if __name__ == "__main__":
         ],
     )
 
-    data_list = []
-    for url in article_urls:
-        try:
-            scraper = RapplerScraper(url)
-            data = scraper.scrape_article()
-            if data:
-                data_list.append(data)
-            time.sleep(1)
-        except Exception as e:
-            logging.error(f"Failed to scrape {url}: {e}")
-
-    with open("rappler_data.json", "w", encoding="utf-8") as output:
-        json.dump(data_list, output)
+    if command_line_args.enable_multiprocessing:
+        with Pool(processes=cpu_count()) as pool:
+            pool.map(scrape_and_save_article, article_urls)
+    else:
+        for url in article_urls:
+            scrape_and_save_article(url)
