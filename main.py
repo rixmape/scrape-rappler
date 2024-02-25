@@ -61,9 +61,7 @@ class SitemapScraper(BaseScraper):
             if "post-sitemap" in (url := link.get_attribute("href"))
         ]
 
-    def fetch_post_sitemaps(self, sitemaps, max_urls=None, ignore_urls=None):
-        if ignore_urls is None:
-            ignore_urls = []
+    def fetch_post_sitemaps(self, sitemaps, max_urls=None):
         article_urls = []
         for sitemap in sitemaps:
             if max_urls is not None and len(article_urls) >= max_urls:
@@ -74,14 +72,13 @@ class SitemapScraper(BaseScraper):
                 url
                 for a in self.driver.find_elements(By.TAG_NAME, "a")
                 if (url := a.get_attribute("href")).startswith(self.BASE_URL)
-                and url not in ignore_urls
             ]
             article_urls.extend(urls)
         if max_urls is not None:
             article_urls = article_urls[:max_urls]
         return article_urls
 
-    def scrape_sitemap(self, max_urls=None, ignore_urls=None):
+    def scrape_sitemap(self, max_urls=None):
         try:
             post_sitemaps = self.fetch_main_sitemap()
             if not post_sitemaps:
@@ -89,11 +86,7 @@ class SitemapScraper(BaseScraper):
                 return []
             logging.info("Fetched %s post sitemaps.", len(post_sitemaps))
 
-            urls = self.fetch_post_sitemaps(
-                post_sitemaps,
-                max_urls=max_urls,
-                ignore_urls=ignore_urls,
-            )
+            urls = self.fetch_post_sitemaps(post_sitemaps, max_urls=max_urls)
             if not urls:
                 logging.error("No article URLs found.")
                 return []
@@ -210,9 +203,6 @@ if __name__ == "__main__":
     sitemap_scraper = SitemapScraper(sitemap_url)
     article_urls = sitemap_scraper.scrape_sitemap(
         max_urls=command_line_args.limit_article,
-        ignore_urls=[
-            "https://www.rappler.com/latest/",  # Just a list of titles
-        ],
     )
 
     if command_line_args.enable_multiprocessing:
