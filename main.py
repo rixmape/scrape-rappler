@@ -10,6 +10,11 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(process)d - %(message)s",
+)
+
 
 class BaseScraper:
     def __init__(self):
@@ -182,15 +187,7 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def setup_logging():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - [PID: %(process)d] - %(message)s",
-    )
-
-
 def scrape_and_save_article(url):
-    setup_logging()
     scraper = RapplerScraper(url)
     data = scraper.scrape_article()
     save_to_json(data)
@@ -206,7 +203,6 @@ def save_to_json(data):
 
 if __name__ == "__main__":
     command_line_args = parse_arguments()
-    setup_logging()
 
     os.makedirs("out", exist_ok=True)
 
