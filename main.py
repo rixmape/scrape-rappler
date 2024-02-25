@@ -174,13 +174,23 @@ def parse_arguments():
         default="INFO",
         help="set the logging level",
     )
+    parser.add_argument(
+        "--enable-multiprocessing",
+        action="store_true",
+        help="enable multiprocessing for scraping",
+    )
     return parser.parse_args()
 
 
-def scrape_article(url):
-    url_hash = hashlib.sha256(url.encode()).hexdigest()
+def scrape_and_save_article(url):
     scraper = RapplerScraper(url)
     data = scraper.scrape_article()
+    save_to_json(data)
+
+
+def save_to_json(data):
+    url = data["url"]
+    url_hash = hashlib.sha256(url.encode()).hexdigest()
     filename = os.path.join("out", f"{url_hash}.json")
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(data, f)
@@ -205,5 +215,9 @@ if __name__ == "__main__":
         ],
     )
 
-    with Pool(processes=cpu_count()) as pool:
-        results = pool.map(scrape_article, article_urls)
+    if command_line_args.enable_multiprocessing:
+        with Pool(processes=cpu_count()) as pool:
+            pool.map(scrape_and_save_article, article_urls)
+    else:
+        for url in article_urls:
+            scrape_and_save_article(url)
