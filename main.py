@@ -78,17 +78,23 @@ class SitemapScraper(BaseScraper):
         return article_urls
 
     def scrape_sitemap(self, max_urls=None, ignore_urls=None):
-        logging.info("Fetching article URLs.")
-        post_sitemaps = self.fetch_main_sitemap()
-        if not post_sitemaps:
-            logging.error("No post sitemaps found.")
+        try:
+            logging.info("Fetching article URLs.")
+            post_sitemaps = self.fetch_main_sitemap()
+            if not post_sitemaps:
+                logging.error("No post sitemaps found.")
+                return []
+            urls = self.fetch_post_sitemaps(
+                post_sitemaps,
+                max_urls=max_urls,
+                ignore_urls=ignore_urls,
+            )
+            logging.info("Fetched %s article URLs.", len(urls))
+        except Exception as e:
+            logging.error("Failed to scrape sitemap: %s", e)
             return []
-        urls = self.fetch_post_sitemaps(
-            post_sitemaps,
-            max_urls=max_urls,
-            ignore_urls=ignore_urls,
-        )
-        logging.info("Fetched %s article URLs.", len(urls))
+        finally:
+            self.quit_driver()
         return urls
 
 
