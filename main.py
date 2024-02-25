@@ -14,6 +14,11 @@ class BaseScraper:
         chrome_options = webdriver.ChromeOptions()
         chrome_options.add_argument("--headless")
         chrome_options.add_argument("log-level=3")
+        chrome_options.add_argument("--disable-extensions")
+
+        prefs = {"profile.managed_default_content_settings.images": 2}
+        chrome_options.add_experimental_option("prefs", prefs)
+
         self.driver = webdriver.Chrome(options=chrome_options)
 
     def navigate_to_url(self, url):
