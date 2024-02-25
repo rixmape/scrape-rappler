@@ -15,8 +15,8 @@ class BaseScraper:
     def __init__(self):
         chrome_options = webdriver.ChromeOptions()
         chrome_options.add_argument("--headless")
-        chrome_options.add_argument("log-level=3")
         chrome_options.add_argument("--disable-extensions")
+        chrome_options.add_argument("log-level=3")
 
         prefs = {"profile.managed_default_content_settings.images": 2}
         chrome_options.add_experimental_option("prefs", prefs)
@@ -24,11 +24,9 @@ class BaseScraper:
         self.driver = webdriver.Chrome(options=chrome_options)
 
     def navigate_to_url(self, url):
-        logging.info("Navigating to URL: %s", url)
         self.driver.get(url)
 
     def wait_for_element(self, identifier, by=By.XPATH, wait_time=10):
-        logging.info("Waiting for element: %s", identifier)
         return WebDriverWait(self.driver, wait_time).until(
             EC.presence_of_element_located((by, identifier))
         )
@@ -49,15 +47,14 @@ class SitemapScraper(BaseScraper):
         self.main_sitemap_url = main_sitemap_url
 
     def fetch_main_sitemap(self):
+        logging.info("Fetching post sitemaps from %s...", self.main_sitemap_url)
         self.navigate_to_url(self.main_sitemap_url)
         links = self.driver.find_elements(By.TAG_NAME, "a")
-        post_sitemaps = [
+        return [
             url
             for link in links
             if "post-sitemap" in (url := link.get_attribute("href"))
         ]
-        logging.info("Found %s post sitemaps.", len(post_sitemaps))
-        return post_sitemaps
 
     def fetch_post_sitemaps(self, sitemaps, max_urls=None, ignore_urls=None):
         if ignore_urls is None:
@@ -65,8 +62,8 @@ class SitemapScraper(BaseScraper):
         article_urls = []
         for sitemap in sitemaps:
             if max_urls is not None and len(article_urls) >= max_urls:
-                logging.info("Reached max URLs.")
                 break
+            logging.info("Fetching article URLs from %s...", sitemap)
             self.navigate_to_url(sitemap)
             urls = [
                 url
@@ -81,16 +78,20 @@ class SitemapScraper(BaseScraper):
 
     def scrape_sitemap(self, max_urls=None, ignore_urls=None):
         try:
-            logging.info("Fetching article URLs.")
             post_sitemaps = self.fetch_main_sitemap()
             if not post_sitemaps:
                 logging.error("No post sitemaps found.")
                 return []
+            logging.info("Fetched %s post sitemaps.", len(post_sitemaps))
+
             urls = self.fetch_post_sitemaps(
                 post_sitemaps,
                 max_urls=max_urls,
                 ignore_urls=ignore_urls,
             )
+            if not urls:
+                logging.error("No article URLs found.")
+                return []
             logging.info("Fetched %s article URLs.", len(urls))
         except Exception as e:
             logging.error("Failed to scrape sitemap: %s", e)
@@ -113,6 +114,7 @@ class RapplerScraper(BaseScraper):
         self.article_url = article_url
 
     def collect_moodmeter_data(self):
+        logging.info("Fetching moodmeter data...")
         moods_container = self.wait_for_element(self.MOODS_CONTAINER_XPATH)
         moods = [
             heading.text
@@ -126,17 +128,21 @@ class RapplerScraper(BaseScraper):
         return dict(zip(moods, percentages))
 
     def scrape_article(self):
-        logging.info("Scraping article: %s", self.article_url)
+        logging.info("Scraping article from %s...", self.article_url)
         self.navigate_to_url(self.article_url)
         article_data = {}
 
         try:
+            logging.info("Fetching title...")
             title = self.wait_for_element(self.ARTICLE_TITLE_XPATH).text
+
+            logging.info("Fetching content...")
             content = self.wait_for_element(self.ARTICLE_CONTENT_XPATH).text
 
             try:
                 self.click_element_via_js(self.SEE_MOODS_XPATH)
             except:
+                logging.info("Moodmeter not available. Emulating a vote...")
                 self.click_element_via_js(self.VOTE_DIV_XPATH)
                 self.click_element_via_js(self.HAPPY_DIV_XPATH)
 
@@ -179,7 +185,7 @@ def parse_arguments():
 def setup_logging():
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s - %(levelname)s - %(message)s",
+        format="%(asctime)s - %(levelname)s - [PID: %(process)d] - %(message)s",
     )
 
 
