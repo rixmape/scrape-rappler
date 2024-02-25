@@ -5,6 +5,7 @@ import logging
 import os
 from multiprocessing import Pool, cpu_count
 
+from selenium.common.exceptions import TimeoutException
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
@@ -111,6 +112,23 @@ class RapplerScraper(BaseScraper):
         super().__init__()
         self.article_url = article_url
 
+    def emulate_voting(self):
+        try:
+            logging.info("Emulating a vote...")
+            self.click_element_via_js(self.VOTE_DIV_XPATH)
+            self.click_element_via_js(self.HAPPY_DIV_XPATH)
+        except TimeoutException:
+            logging.error("Failed to emulate a vote.")
+            raise TimeoutException  # To be caught by `scrape_article` method
+
+    def attempt_moodmeter_interaction(self):
+        try:
+            logging.info("Checking for previous reactions...")
+            self.click_element_via_js(self.SEE_MOODS_XPATH)
+        except TimeoutException:
+            logging.warning("No previous reactions found.")
+            self.emulate_voting()
+
     def collect_moodmeter_data(self):
         logging.info("Fetching moodmeter data...")
         moods_container = self.wait_for_element(self.MOODS_CONTAINER_XPATH)
@@ -128,37 +146,37 @@ class RapplerScraper(BaseScraper):
     def scrape_article(self):
         logging.info("Scraping article from %s...", self.article_url)
         self.navigate_to_url(self.article_url)
-        article_data = {}
+        article_data = {
+            "url": self.article_url,
+            "title": None,
+            "content": None,
+            "moods": None,
+        }
 
         try:
             logging.info("Fetching title...")
             title = self.wait_for_element(self.ARTICLE_TITLE_XPATH).text
+            article_data["title"] = title
 
             logging.info("Fetching content...")
             content = self.wait_for_element(self.ARTICLE_CONTENT_XPATH).text
+            article_data["content"] = content
 
-            try:
-                self.click_element_via_js(self.SEE_MOODS_XPATH)
-            except:
-                logging.info("Moodmeter not available. Emulating a vote...")
-                self.click_element_via_js(self.VOTE_DIV_XPATH)
-                self.click_element_via_js(self.HAPPY_DIV_XPATH)
+            logging.info("Triggering moodmeter interaction...")
+            self.attempt_moodmeter_interaction()
 
+            logging.info("Fetching moodmeter data...")
             moods = self.collect_moodmeter_data()
-
-            article_data = {
-                "title": title,
-                "url": self.article_url,
-                "content": content,
-                "moods": moods,
-            }
+            article_data["moods"] = moods
+        except TimeoutException as te:
+            logging.error(f"A timeout occurred during scraping: {te}")
+        except webdriver.common.exceptions.WebDriverException as we:
+            logging.error(f"WebDriver error occurred: {we}")
         except Exception as e:
-            logging.error("Failed to scrape article: %s", e)
+            logging.error(f"An unexpected error occurred during scraping: {e}")
         finally:
-            self.driver.quit()
-            logging.info("Finished scraping article.")
-
-        return article_data
+            self.quit_driver()
+            return article_data
 
 
 def parse_arguments():
