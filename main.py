@@ -204,18 +204,25 @@ def scrape_and_save_article(url):
     save_to_json(data)
 
 
-def save_to_json(data):
+def save_to_json(data, output_dir="out"):
     url = data["url"]
     url_hash = hashlib.sha256(url.encode()).hexdigest()
-    filename = os.path.join("out", f"{url_hash}.json")
+
+    if all(value is not None for value in data.values()):
+        directory = os.path.join(output_dir, "complete")
+    else:
+        directory = os.path.join(output_dir, "incomplete")
+
+    os.makedirs(directory, exist_ok=True)
+
+    filename = os.path.join(directory, f"{url_hash}.json")
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(data, f)
+    logging.info("Saved data to %s.", filename)
 
 
 if __name__ == "__main__":
     command_line_args = parse_arguments()
-
-    os.makedirs("out", exist_ok=True)
 
     sitemap_url = "https://www.rappler.com/sitemap_index.xml"
     sitemap_scraper = SitemapScraper(sitemap_url)
