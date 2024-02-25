@@ -1,7 +1,9 @@
 import argparse
+import hashlib
 import json
 import logging
-import time
+import os
+from multiprocessing import Pool, cpu_count
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -103,6 +105,8 @@ class RapplerScraper(BaseScraper):
     ARTICLE_CONTENT_XPATH = "//div[contains(@class,'post-single__content')]"
     MOODS_CONTAINER_XPATH = "//div[contains(@class,'xa3V2iPvKCrXH2KVimTv-g==')]"
     SEE_MOODS_XPATH = "//div[contains(@class,'AOhvJlN4Z5TsLqKZb1kSBw==')]"
+    VOTE_DIV_XPATH = "//div[contains(@class,'i1IMtjULF3BKu3lB0m1ilg==')]"
+    HAPPY_DIV_XPATH = "//div[contains(@class,'mood-happy')]"
 
     def __init__(self, article_url):
         super().__init__()
@@ -173,6 +177,15 @@ def parse_arguments():
     return parser.parse_args()
 
 
+def scrape_article(url):
+    url_hash = hashlib.sha256(url.encode()).hexdigest()
+    scraper = RapplerScraper(url)
+    data = scraper.scrape_article()
+    filename = os.path.join("out", f"{url_hash}.json")
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+
+
 if __name__ == "__main__":
     command_line_args = parse_arguments()
 
@@ -180,6 +193,8 @@ if __name__ == "__main__":
         level=command_line_args.log_level,
         format="%(asctime)s - %(levelname)s - %(message)s",
     )
+
+    os.makedirs("out", exist_ok=True)
 
     sitemap_url = "https://www.rappler.com/sitemap_index.xml"
     sitemap_scraper = SitemapScraper(sitemap_url)
@@ -190,16 +205,5 @@ if __name__ == "__main__":
         ],
     )
 
-    data_list = []
-    for url in article_urls:
-        try:
-            scraper = RapplerScraper(url)
-            data = scraper.scrape_article()
-            if data:
-                data_list.append(data)
-            time.sleep(1)
-        except Exception as e:
-            logging.error(f"Failed to scrape {url}: {e}")
-
-    with open("rappler_data.json", "w", encoding="utf-8") as output:
-        json.dump(data_list, output)
+    with Pool(processes=cpu_count()) as pool:
+        results = pool.map(scrape_article, article_urls)
