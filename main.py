@@ -211,6 +211,8 @@ def save_to_json(data, output_dir="out"):
     if all(value is not None for value in data.values()):
         directory = os.path.join(output_dir, "complete")
     else:
+        missing_fields = [k for k, v in data.items() if v is None]
+        logging.warning("Missing fields: %s.", ", ".join(missing_fields))
         directory = os.path.join(output_dir, "incomplete")
 
     os.makedirs(directory, exist_ok=True)
