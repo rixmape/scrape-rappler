@@ -2,11 +2,11 @@ import argparse
 import hashlib
 import json
 import logging
+import multiprocessing as mp
 import os
-from multiprocessing import Pool, cpu_count
 
-from selenium.common.exceptions import TimeoutException
 from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -31,31 +31,31 @@ class BaseScraper:
         )
         self.driver = webdriver.Chrome(options=chrome_options)
 
-    def _navigate_to_url(self, url):
+    def navigate_to_url(self, url):
         """Navigate to the given URL."""
         self.driver.get(url)
 
-    def _get_urls(self, condition):
+    def get_urls(self, condition):
         """Extract URLs from the current page based on the given condition."""
         urls = []
-        for a in self.driver.find_elements(By.TAG_NAME, "a"):
-            url = a.get_attribute("href")
+        for a_tag in self.driver.find_elements(By.TAG_NAME, "a"):
+            url = a_tag.get_attribute("href")
             if condition(url):
                 urls.append(url)
         return urls
 
-    def _wait_for_element(self, identifier, by=By.XPATH, wait_time=10):
+    def wait_for_element(self, identifier, by=By.XPATH, wait_time=10):
         """Wait for the element to be present in the DOM."""
         return WebDriverWait(self.driver, wait_time).until(
             EC.presence_of_element_located((by, identifier))
         )
 
-    def _click_element_via_js(self, identifier, by=By.XPATH):
+    def click_element_via_js(self, identifier, by=By.XPATH):
         """Click the element using JavaScript."""
-        element = self._wait_for_element(identifier, by=by)
+        element = self.wait_for_element(identifier, by=by)
         self.driver.execute_script("arguments[0].click();", element)
 
-    def _quit_driver(self):
+    def quit_driver(self):
         """Quit the WebDriver."""
         self.driver.quit()
 
@@ -72,29 +72,29 @@ class SitemapScraper(BaseScraper):
     def _get_post_sitemaps(self):
         """Extract post sitemaps from the main sitemap."""
         logging.info("Fetching post sitemaps from %s...", self.main_sitemap_url)
-        self._navigate_to_url(self.main_sitemap_url)
-        return self._get_urls(lambda url: "post-sitemap" in url)
+        self.navigate_to_url(self.main_sitemap_url)
+        return self.get_urls(lambda url: "post-sitemap" in url)
 
     def _get_article_urls(self, sitemap):
         """Extract article URLs from the given sitemap."""
         logging.info("Fetching article URLs from %s...", sitemap)
-        self._navigate_to_url(sitemap)
-        return self._get_urls(lambda url: url.startswith(self.BASE_URL))
+        self.navigate_to_url(sitemap)
+        return self.get_urls(lambda url: url.startswith(self.BASE_URL))
 
     def scrape_sitemap(self, max_url=None):
         """Scrape certain number of article URLs from the sitemaps."""
         logging.info("Scraping article URLs from sitemaps...")
         post_sitemaps = self._get_post_sitemaps()
-        urls = []
+        article_urls = []
         for sitemap in post_sitemaps:
             new_urls = self._get_article_urls(sitemap)
-            urls.extend(new_urls)
-            if max_url is not None and len(urls) >= max_url:
-                urls = urls[:max_url]
+            article_urls.extend(new_urls)
+            if max_url is not None and len(article_urls) >= max_url:
+                article_urls = article_urls[:max_url]
                 break
-        self._quit_driver()
-        logging.info("Scraped %s article URLs.", len(urls))
-        return urls
+        self.quit_driver()
+        logging.info("Scraped %s article URLs.", len(article_urls))
+        return article_urls
 
 
 class RapplerScraper(BaseScraper):
@@ -115,8 +115,8 @@ class RapplerScraper(BaseScraper):
         """Cast a vote on the moodmeter to see reactions."""
         try:
             logging.info("Emulating a vote...")
-            self._click_element_via_js(self.VOTE_DIV_XPATH)
-            self._click_element_via_js(self.HAPPY_DIV_XPATH)
+            self.click_element_via_js(self.VOTE_DIV_XPATH)
+            self.click_element_via_js(self.HAPPY_DIV_XPATH)
         except TimeoutException:
             logging.error("Failed to emulate a vote.")
             raise TimeoutException  # To be caught by `scrape_article` method
@@ -125,7 +125,7 @@ class RapplerScraper(BaseScraper):
         """Check for reactions and emulate voting if none."""
         try:
             logging.info("Checking for reactions...")
-            self._click_element_via_js(self.SEE_MOODS_XPATH)
+            self.click_element_via_js(self.SEE_MOODS_XPATH)
         except TimeoutException:
             logging.warning("No reactions found.")
             self._emulate_voting()
@@ -133,14 +133,14 @@ class RapplerScraper(BaseScraper):
     def _collect_moodmeter_data(self):
         """Collect moodmeter data from the article."""
         logging.info("Fetching moodmeter data...")
-        moods_container = self._wait_for_element(self.MOODS_CONTAINER_XPATH)
+        moodmeter = self.wait_for_element(self.MOODS_CONTAINER_XPATH)
         moods = [
             heading.text
-            for heading in moods_container.find_elements(By.TAG_NAME, "h4")
+            for heading in moodmeter.find_elements(By.TAG_NAME, "h4")
         ]
         percentages = [
             span.text
-            for span in moods_container.find_elements(By.TAG_NAME, "span")
+            for span in moodmeter.find_elements(By.TAG_NAME, "span")
             if "%" in span.text
         ]
         return dict(zip(moods, percentages))
@@ -148,12 +148,12 @@ class RapplerScraper(BaseScraper):
     def _fetch_title(self):
         """Fetch title from the article."""
         logging.info("Fetching title...")
-        return self._wait_for_element(self.ARTICLE_TITLE_XPATH).text
+        return self.wait_for_element(self.ARTICLE_TITLE_XPATH).text
 
     def _fetch_content(self):
         """Fetch content from the article."""
         logging.info("Fetching content...")
-        return self._wait_for_element(self.ARTICLE_CONTENT_XPATH).text
+        return self.wait_for_element(self.ARTICLE_CONTENT_XPATH).text
 
     def _fetch_moods(self):
         """Fetch moodmeter data from the article."""
@@ -165,7 +165,7 @@ class RapplerScraper(BaseScraper):
     def scrape_article(self):
         """Scrape article data from the given URL."""
         logging.info("Scraping article from %s...", self.article_url)
-        self._navigate_to_url(self.article_url)
+        self.navigate_to_url(self.article_url)
         article_data = {
             "url": self.article_url,
             "title": None,
@@ -184,11 +184,12 @@ class RapplerScraper(BaseScraper):
         except Exception as e:
             logging.error(f"An unexpected error occurred during scraping: {e}")
         finally:
-            self._quit_driver()
+            self.quit_driver()
             return article_data
 
 
 def parse_arguments():
+    """Parse command line arguments."""
     parser = argparse.ArgumentParser(
         description="Scrape articles from Rappler website.",
     )
@@ -214,19 +215,21 @@ def parse_arguments():
 
 
 def scrape_and_save_article(url):
+    """Scrape and save article data to a JSON file."""
     scraper = RapplerScraper(url)
-    data = scraper.scrape_article()
-    save_to_json(data)
+    article_data = scraper.scrape_article()
+    save_to_json(article_data)
 
 
-def save_to_json(data, output_dir="out"):
-    url = data["url"]
-    url_hash = hashlib.sha256(url.encode()).hexdigest()
+def save_to_json(article_data, output_dir="out"):
+    """Save article data to a JSON file."""
+    article_url = article_data["url"]
+    url_hash = hashlib.sha256(article_url.encode()).hexdigest()
 
-    if all(value is not None for value in data.values()):
+    if all(value is not None for value in article_data.values()):
         directory = os.path.join(output_dir, "complete")
     else:
-        missing_fields = [k for k, v in data.items() if v is None]
+        missing_fields = [k for k, v in article_data.items() if v is None]
         logging.warning("Missing fields: %s.", ", ".join(missing_fields))
         directory = os.path.join(output_dir, "incomplete")
 
@@ -234,7 +237,7 @@ def save_to_json(data, output_dir="out"):
 
     filename = os.path.join(directory, f"{url_hash}.json")
     with open(filename, "w", encoding="utf-8") as f:
-        json.dump(data, f)
+        json.dump(article_data, f)
     logging.info("Saved data to %s.", filename)
 
 
@@ -247,7 +250,7 @@ if __name__ == "__main__":
     )
 
     if args.enable_multiprocessing:
-        with Pool(processes=cpu_count()) as pool:
+        with mp.Pool(processes=mp.cpu_count()) as pool:
             pool.map(scrape_and_save_article, article_urls)
     else:
         for url in article_urls:
