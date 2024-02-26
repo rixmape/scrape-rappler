@@ -18,30 +18,45 @@ logging.basicConfig(
 
 
 class BaseScraper:
+    """Base class for web scraping using Selenium."""
+
     def __init__(self):
         chrome_options = webdriver.ChromeOptions()
         chrome_options.add_argument("--headless")
         chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("log-level=3")
-
-        prefs = {"profile.managed_default_content_settings.images": 2}
-        chrome_options.add_experimental_option("prefs", prefs)
-
+        chrome_options.add_experimental_option(
+            "prefs",
+            {"profile.managed_default_content_settings.images": 2},
+        )
         self.driver = webdriver.Chrome(options=chrome_options)
 
-    def navigate_to_url(self, url):
+    def _navigate_to_url(self, url):
+        """Navigate to the given URL."""
         self.driver.get(url)
 
-    def wait_for_element(self, identifier, by=By.XPATH, wait_time=10):
+    def _get_urls(self, condition):
+        """Extract URLs from the current page based on the given condition."""
+        urls = []
+        for a in self.driver.find_elements(By.TAG_NAME, "a"):
+            url = a.get_attribute("href")
+            if condition(url):
+                urls.append(url)
+        return urls
+
+    def _wait_for_element(self, identifier, by=By.XPATH, wait_time=10):
+        """Wait for the element to be present in the DOM."""
         return WebDriverWait(self.driver, wait_time).until(
             EC.presence_of_element_located((by, identifier))
         )
 
-    def click_element_via_js(self, identifier, by=By.XPATH):
-        element = self.wait_for_element(identifier, by=by)
+    def _click_element_via_js(self, identifier, by=By.XPATH):
+        """Click the element using JavaScript."""
+        element = self._wait_for_element(identifier, by=by)
         self.driver.execute_script("arguments[0].click();", element)
 
-    def quit_driver(self):
+    def _quit_driver(self):
+        """Quit the WebDriver."""
         self.driver.quit()
 
 
@@ -54,25 +69,16 @@ class SitemapScraper(BaseScraper):
         super().__init__()
         self.main_sitemap_url = main_sitemap_url
 
-    def _get_urls(self, condition):
-        """Extract URLs from the current page based on the given condition."""
-        urls = []
-        for a in self.driver.find_elements(By.TAG_NAME, "a"):
-            url = a.get_attribute("href")
-            if condition(url):
-                urls.append(url)
-        return urls
-
     def _get_post_sitemaps(self):
         """Extract post sitemaps from the main sitemap."""
         logging.info("Fetching post sitemaps from %s...", self.main_sitemap_url)
-        self.navigate_to_url(self.main_sitemap_url)
+        self._navigate_to_url(self.main_sitemap_url)
         return self._get_urls(lambda url: "post-sitemap" in url)
 
     def _get_article_urls(self, sitemap):
         """Extract article URLs from the given sitemap."""
         logging.info("Fetching article URLs from %s...", sitemap)
-        self.navigate_to_url(sitemap)
+        self._navigate_to_url(sitemap)
         return self._get_urls(lambda url: url.startswith(self.BASE_URL))
 
     def scrape_sitemap(self, max_url=None):
@@ -86,7 +92,7 @@ class SitemapScraper(BaseScraper):
             if max_url is not None and len(urls) >= max_url:
                 urls = urls[:max_url]
                 break
-        self.quit_driver()
+        self._quit_driver()
         logging.info("Scraped %s article URLs.", len(urls))
         return urls
 
@@ -106,8 +112,8 @@ class RapplerScraper(BaseScraper):
     def emulate_voting(self):
         try:
             logging.info("Emulating a vote...")
-            self.click_element_via_js(self.VOTE_DIV_XPATH)
-            self.click_element_via_js(self.HAPPY_DIV_XPATH)
+            self._click_element_via_js(self.VOTE_DIV_XPATH)
+            self._click_element_via_js(self.HAPPY_DIV_XPATH)
         except TimeoutException:
             logging.error("Failed to emulate a vote.")
             raise TimeoutException  # To be caught by `scrape_article` method
@@ -122,7 +128,7 @@ class RapplerScraper(BaseScraper):
 
     def collect_moodmeter_data(self):
         logging.info("Fetching moodmeter data...")
-        moods_container = self.wait_for_element(self.MOODS_CONTAINER_XPATH)
+        moods_container = self._wait_for_element(self.MOODS_CONTAINER_XPATH)
         moods = [
             heading.text
             for heading in moods_container.find_elements(By.TAG_NAME, "h4")
@@ -136,7 +142,7 @@ class RapplerScraper(BaseScraper):
 
     def scrape_article(self):
         logging.info("Scraping article from %s...", self.article_url)
-        self.navigate_to_url(self.article_url)
+        self._navigate_to_url(self.article_url)
         article_data = {
             "url": self.article_url,
             "title": None,
@@ -146,11 +152,11 @@ class RapplerScraper(BaseScraper):
 
         try:
             logging.info("Fetching title...")
-            title = self.wait_for_element(self.ARTICLE_TITLE_XPATH).text
+            title = self._wait_for_element(self.ARTICLE_TITLE_XPATH).text
             article_data["title"] = title
 
             logging.info("Fetching content...")
-            content = self.wait_for_element(self.ARTICLE_CONTENT_XPATH).text
+            content = self._wait_for_element(self.ARTICLE_CONTENT_XPATH).text
             article_data["content"] = content
 
             logging.info("Triggering moodmeter interaction...")
@@ -166,7 +172,7 @@ class RapplerScraper(BaseScraper):
         except Exception as e:
             logging.error(f"An unexpected error occurred during scraping: {e}")
         finally:
-            self.quit_driver()
+            self._quit_driver()
             return article_data
 
 
