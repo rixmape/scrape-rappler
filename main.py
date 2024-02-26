@@ -1,3 +1,8 @@
+"""
+This module contains the main script for scraping articles from the Rappler
+website. It uses Selenium to navigate the website and extract article data.
+"""
+
 import argparse
 import hashlib
 import json
