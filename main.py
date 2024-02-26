@@ -175,6 +175,12 @@ def parse_arguments():
         description="Scrape articles from Rappler website.",
     )
     parser.add_argument(
+        "--main-sitemap",
+        metavar="URL",
+        help="URL of the main sitemap",
+        default="https://www.rappler.com/sitemap_index.xml",
+    )
+    parser.add_argument(
         "--limit-article",
         type=int,
         metavar="N",
@@ -215,15 +221,14 @@ def save_to_json(data, output_dir="out"):
 
 
 if __name__ == "__main__":
-    command_line_args = parse_arguments()
+    args = parse_arguments()
 
-    sitemap_url = "https://www.rappler.com/sitemap_index.xml"
-    sitemap_scraper = SitemapScraper(sitemap_url)
+    sitemap_scraper = SitemapScraper(args.main_sitemap)
     article_urls = sitemap_scraper.scrape_sitemap(
-        max_url=command_line_args.limit_article,
+        max_url=args.limit_article,
     )
 
-    if command_line_args.enable_multiprocessing:
+    if args.enable_multiprocessing:
         with Pool(processes=cpu_count()) as pool:
             pool.map(scrape_and_save_article, article_urls)
     else:
