@@ -98,6 +98,8 @@ class SitemapScraper(BaseScraper):
 
 
 class RapplerScraper(BaseScraper):
+    """Scrape article data from Rappler website."""
+
     ARTICLE_TITLE_XPATH = "//h1[contains(@class,'post-single__title')]"
     ARTICLE_CONTENT_XPATH = "//div[contains(@class,'post-single__content')]"
     MOODS_CONTAINER_XPATH = "//div[contains(@class,'xa3V2iPvKCrXH2KVimTv-g==')]"
@@ -109,7 +111,8 @@ class RapplerScraper(BaseScraper):
         super().__init__()
         self.article_url = article_url
 
-    def emulate_voting(self):
+    def _emulate_voting(self):
+        """Cast a vote on the moodmeter to see reactions."""
         try:
             logging.info("Emulating a vote...")
             self._click_element_via_js(self.VOTE_DIV_XPATH)
@@ -118,15 +121,17 @@ class RapplerScraper(BaseScraper):
             logging.error("Failed to emulate a vote.")
             raise TimeoutException  # To be caught by `scrape_article` method
 
-    def attempt_moodmeter_interaction(self):
+    def _attempt_moodmeter_interaction(self):
+        """Check for reactions and emulate voting if none."""
         try:
-            logging.info("Checking for previous reactions...")
-            self.click_element_via_js(self.SEE_MOODS_XPATH)
+            logging.info("Checking for reactions...")
+            self._click_element_via_js(self.SEE_MOODS_XPATH)
         except TimeoutException:
-            logging.warning("No previous reactions found.")
-            self.emulate_voting()
+            logging.warning("No reactions found.")
+            self._emulate_voting()
 
-    def collect_moodmeter_data(self):
+    def _collect_moodmeter_data(self):
+        """Collect moodmeter data from the article."""
         logging.info("Fetching moodmeter data...")
         moods_container = self._wait_for_element(self.MOODS_CONTAINER_XPATH)
         moods = [
@@ -140,7 +145,25 @@ class RapplerScraper(BaseScraper):
         ]
         return dict(zip(moods, percentages))
 
+    def _fetch_title(self):
+        """Fetch title from the article."""
+        logging.info("Fetching title...")
+        return self._wait_for_element(self.ARTICLE_TITLE_XPATH).text
+
+    def _fetch_content(self):
+        """Fetch content from the article."""
+        logging.info("Fetching content...")
+        return self._wait_for_element(self.ARTICLE_CONTENT_XPATH).text
+
+    def _fetch_moods(self):
+        """Fetch moodmeter data from the article."""
+        logging.info("Triggering moodmeter interaction...")
+        self._attempt_moodmeter_interaction()
+        logging.info("Fetching moodmeter data...")
+        return self._collect_moodmeter_data()
+
     def scrape_article(self):
+        """Scrape article data from the given URL."""
         logging.info("Scraping article from %s...", self.article_url)
         self._navigate_to_url(self.article_url)
         article_data = {
@@ -151,20 +174,9 @@ class RapplerScraper(BaseScraper):
         }
 
         try:
-            logging.info("Fetching title...")
-            title = self._wait_for_element(self.ARTICLE_TITLE_XPATH).text
-            article_data["title"] = title
-
-            logging.info("Fetching content...")
-            content = self._wait_for_element(self.ARTICLE_CONTENT_XPATH).text
-            article_data["content"] = content
-
-            logging.info("Triggering moodmeter interaction...")
-            self.attempt_moodmeter_interaction()
-
-            logging.info("Fetching moodmeter data...")
-            moods = self.collect_moodmeter_data()
-            article_data["moods"] = moods
+            article_data["title"] = self._fetch_title()
+            article_data["content"] = self._fetch_content()
+            article_data["moods"] = self._fetch_moods()
         except TimeoutException as te:
             logging.error(f"A timeout occurred during scraping: {te}")
         except webdriver.common.exceptions.WebDriverException as we:
