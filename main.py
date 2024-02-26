@@ -46,57 +46,48 @@ class BaseScraper:
 
 
 class SitemapScraper(BaseScraper):
+    """Scrape article URLs from the sitemaps of Rappler website."""
+
     BASE_URL = "https://www.rappler.com"
 
     def __init__(self, main_sitemap_url):
         super().__init__()
         self.main_sitemap_url = main_sitemap_url
 
-    def fetch_main_sitemap(self):
+    def _get_urls(self, condition):
+        """Extract URLs from the current page based on the given condition."""
+        urls = []
+        for a in self.driver.find_elements(By.TAG_NAME, "a"):
+            url = a.get_attribute("href")
+            if condition(url):
+                urls.append(url)
+        return urls
+
+    def _get_post_sitemaps(self):
+        """Extract post sitemaps from the main sitemap."""
         logging.info("Fetching post sitemaps from %s...", self.main_sitemap_url)
         self.navigate_to_url(self.main_sitemap_url)
-        links = self.driver.find_elements(By.TAG_NAME, "a")
-        return [
-            url
-            for link in links
-            if "post-sitemap" in (url := link.get_attribute("href"))
-        ]
+        return self._get_urls(lambda url: "post-sitemap" in url)
 
-    def fetch_post_sitemaps(self, sitemaps, max_urls=None):
-        article_urls = []
-        for sitemap in sitemaps:
-            if max_urls is not None and len(article_urls) >= max_urls:
+    def _get_article_urls(self, sitemap):
+        """Extract article URLs from the given sitemap."""
+        logging.info("Fetching article URLs from %s...", sitemap)
+        self.navigate_to_url(sitemap)
+        return self._get_urls(lambda url: url.startswith(self.BASE_URL))
+
+    def scrape_sitemap(self, max_url=None):
+        """Scrape certain number of article URLs from the sitemaps."""
+        logging.info("Scraping article URLs from sitemaps...")
+        post_sitemaps = self._get_post_sitemaps()
+        urls = []
+        for sitemap in post_sitemaps:
+            new_urls = self._get_article_urls(sitemap)
+            urls.extend(new_urls)
+            if max_url is not None and len(urls) >= max_url:
+                urls = urls[:max_url]
                 break
-            logging.info("Fetching article URLs from %s...", sitemap)
-            self.navigate_to_url(sitemap)
-            urls = [
-                url
-                for a in self.driver.find_elements(By.TAG_NAME, "a")
-                if (url := a.get_attribute("href")).startswith(self.BASE_URL)
-            ]
-            article_urls.extend(urls)
-        if max_urls is not None:
-            article_urls = article_urls[:max_urls]
-        return article_urls
-
-    def scrape_sitemap(self, max_urls=None):
-        try:
-            post_sitemaps = self.fetch_main_sitemap()
-            if not post_sitemaps:
-                logging.error("No post sitemaps found.")
-                return []
-            logging.info("Fetched %s post sitemaps.", len(post_sitemaps))
-
-            urls = self.fetch_post_sitemaps(post_sitemaps, max_urls=max_urls)
-            if not urls:
-                logging.error("No article URLs found.")
-                return []
-            logging.info("Fetched %s article URLs.", len(urls))
-        except Exception as e:
-            logging.error("Failed to scrape sitemap: %s", e)
-            return []
-        finally:
-            self.quit_driver()
+        self.quit_driver()
+        logging.info("Scraped %s article URLs.", len(urls))
         return urls
 
 
@@ -229,7 +220,7 @@ if __name__ == "__main__":
     sitemap_url = "https://www.rappler.com/sitemap_index.xml"
     sitemap_scraper = SitemapScraper(sitemap_url)
     article_urls = sitemap_scraper.scrape_sitemap(
-        max_urls=command_line_args.limit_article,
+        max_url=command_line_args.limit_article,
     )
 
     if command_line_args.enable_multiprocessing:
