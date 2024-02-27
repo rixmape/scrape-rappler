@@ -201,38 +201,44 @@ def parse_arguments():
         description="Scrape articles from Rappler website.",
     )
     parser.add_argument(
-        "--main-sitemap",
+        "-s",
+        "--sitemap-url",
         metavar="URL",
         help="URL of the main sitemap",
         default="https://www.rappler.com/sitemap_index.xml",
     )
     parser.add_argument(
-        "--limit-article",
+        "-m",
+        "--max-articles",
         type=int,
         metavar="N",
-        help="limit the number of articles to scrape",
+        help="Maximum number of articles to scrape",
         default=None,
     )
     parser.add_argument(
-        "--enable-multiprocessing",
+        "-p",
+        "--use-multiprocessing",
         action="store_true",
-        help="enable multiprocessing for scraping",
+        help="Use multiprocessing for scraping",
     )
     parser.add_argument(
-        "--output-dir",
+        "-o",
+        "--output-directory",
         metavar="DIR",
-        help="directory to save the article data",
+        help="Directory to save the article data",
         default="article_data",
     )
     parser.add_argument(
-        "--save-article-urls",
+        "-u",
+        "--save-urls",
         action="store_true",
-        help="save the scraped article URLs to a file",
+        help="Save the scraped article URLs to a file",
     )
     parser.add_argument(
-        "--article-urls-file",
+        "-f",
+        "--urls-file",
         metavar="FILE",
-        help="file containing the article URLs",
+        help="File containing the article URLs",
         default=None,
     )
     return parser.parse_args()
@@ -268,25 +274,24 @@ def save_to_json(article_data, output_dir="article_data"):
 if __name__ == "__main__":
     args = parse_arguments()
 
-    if args.article_urls_file:
-        with open(args.article_urls_file, "r", encoding="utf-8") as f:
+    if args.urls_file:
+        with open(args.urls_file, "r", encoding="utf-8") as f:
             article_urls = f.read().splitlines()
     else:
-        sitemap_scraper = SitemapScraper(args.main_sitemap)
-        article_urls = sitemap_scraper.scrape_sitemap(
-            max_url=args.limit_article,
-        )
+        scraper = SitemapScraper(args.sitemap_url)
+        article_urls = scraper.scrape_sitemap(max_url=args.max_articles)
 
-    if args.save_article_urls:
-        now = int(time.time())
-        with open(f"article_urls_{now}.txt", "w", encoding="utf-8") as f:
+    if args.save_urls:
+        time_now = int(time.time())
+        filename = f"article_urls_{time_now}.txt"
+        with open(filename, "w", encoding="utf-8") as f:
             f.write("\n".join(article_urls))
 
-    if args.enable_multiprocessing:
+    if args.use_multiprocessing:
         with mp.Pool(processes=mp.cpu_count()) as pool:
             func = partial(
                 scrape_and_save_article,
-                output_dir=args.output_dir,
+                output_dir=args.output_directory,
             )
             pool.map(func, article_urls)
     else:
