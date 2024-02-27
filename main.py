@@ -9,6 +9,7 @@ import json
 import logging
 import multiprocessing as mp
 import os
+from functools import partial
 
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
@@ -216,17 +217,23 @@ def parse_arguments():
         action="store_true",
         help="enable multiprocessing for scraping",
     )
+    parser.add_argument(
+        "--output-dir",
+        metavar="DIR",
+        help="directory to save the article data",
+        default="article_data",
+    )
     return parser.parse_args()
 
 
-def scrape_and_save_article(url):
+def scrape_and_save_article(url, output_dir="article_data"):
     """Scrape and save article data to a JSON file."""
     scraper = RapplerScraper(url)
     article_data = scraper.scrape_article()
-    save_to_json(article_data)
+    save_to_json(article_data, output_dir)
 
 
-def save_to_json(article_data, output_dir="out"):
+def save_to_json(article_data, output_dir="article_data"):
     """Save article data to a JSON file."""
     article_url = article_data["url"]
     url_hash = hashlib.sha256(article_url.encode()).hexdigest()
@@ -256,7 +263,11 @@ if __name__ == "__main__":
 
     if args.enable_multiprocessing:
         with mp.Pool(processes=mp.cpu_count()) as pool:
-            pool.map(scrape_and_save_article, article_urls)
+            func = partial(
+                scrape_and_save_article,
+                output_dir=args.output_dir,
+            )
+            pool.map(func, article_urls)
     else:
         for url in article_urls:
             scrape_and_save_article(url)
