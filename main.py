@@ -229,6 +229,12 @@ def parse_arguments():
         action="store_true",
         help="save the scraped article URLs to a file",
     )
+    parser.add_argument(
+        "--article-urls-file",
+        metavar="FILE",
+        help="file containing the article URLs",
+        default=None,
+    )
     return parser.parse_args()
 
 
@@ -262,10 +268,14 @@ def save_to_json(article_data, output_dir="article_data"):
 if __name__ == "__main__":
     args = parse_arguments()
 
-    sitemap_scraper = SitemapScraper(args.main_sitemap)
-    article_urls = sitemap_scraper.scrape_sitemap(
-        max_url=args.limit_article,
-    )
+    if args.article_urls_file:
+        with open(args.article_urls_file, "r", encoding="utf-8") as f:
+            article_urls = f.read().splitlines()
+    else:
+        sitemap_scraper = SitemapScraper(args.main_sitemap)
+        article_urls = sitemap_scraper.scrape_sitemap(
+            max_url=args.limit_article,
+        )
 
     if args.save_article_urls:
         now = int(time.time())
