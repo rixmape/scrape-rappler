@@ -9,6 +9,7 @@ import json
 import logging
 import multiprocessing as mp
 import os
+import time
 from functools import partial
 
 from selenium import webdriver
@@ -223,6 +224,11 @@ def parse_arguments():
         help="directory to save the article data",
         default="article_data",
     )
+    parser.add_argument(
+        "--save-article-urls",
+        action="store_true",
+        help="save the scraped article URLs to a file",
+    )
     return parser.parse_args()
 
 
@@ -260,6 +266,11 @@ if __name__ == "__main__":
     article_urls = sitemap_scraper.scrape_sitemap(
         max_url=args.limit_article,
     )
+
+    if args.save_article_urls:
+        now = int(time.time())
+        with open(f"article_urls_{now}.txt", "w", encoding="utf-8") as f:
+            f.write("\n".join(article_urls))
 
     if args.enable_multiprocessing:
         with mp.Pool(processes=mp.cpu_count()) as pool:
