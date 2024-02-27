@@ -24,6 +24,37 @@ logging.basicConfig(
 )
 
 
+class ArticleData:
+    """Class to store article data."""
+
+    def __init__(self, url, title=None, content=None, moods=None):
+        self.url = url
+        self.title = title
+        self.content = content
+        self.moods = moods
+
+    def is_complete(self):
+        """Check if the article data is complete."""
+        return all(value is not None for value in vars(self).values())
+
+    def to_json(self):
+        """Convert the article data to a JSON string."""
+        return json.dumps(vars(self))
+
+    def save(self, output_dir):
+        """Save the article data to a JSON file."""
+        url_hash = hashlib.sha256(self.url.encode()).hexdigest()
+        directory = os.path.join(
+            output_dir,
+            "complete" if self.is_complete() else "incomplete",
+        )
+        os.makedirs(directory, exist_ok=True)
+        filename = os.path.join(directory, f"{url_hash}.json")
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(self.to_json())
+        logging.info("Saved data to %s.", filename)
+
+
 class BaseScraper:
     """Base class for web scraping using Selenium."""
 
@@ -114,9 +145,10 @@ class RapplerScraper(BaseScraper):
     VOTE_DIV_XPATH = "//div[contains(@class,'i1IMtjULF3BKu3lB0m1ilg==')]"
     HAPPY_DIV_XPATH = "//div[contains(@class,'mood-happy')]"
 
-    def __init__(self, article_url):
+    def __init__(self, article_url, output_dir):
         super().__init__()
-        self.article_url = article_url
+        self.article_data = ArticleData(article_url)
+        self.output_dir = output_dir
 
     def _emulate_voting(self):
         """Cast a vote on the moodmeter to see reactions."""
@@ -155,35 +187,33 @@ class RapplerScraper(BaseScraper):
     def _fetch_title(self):
         """Fetch title from the article."""
         logging.info("Fetching title...")
-        return self.wait_for_element(self.ARTICLE_TITLE_XPATH).text
+        self.article_data.title = self.wait_for_element(
+            self.ARTICLE_TITLE_XPATH
+        ).text
 
     def _fetch_content(self):
         """Fetch content from the article."""
         logging.info("Fetching content...")
-        return self.wait_for_element(self.ARTICLE_CONTENT_XPATH).text
+        self.article_data.content = self.wait_for_element(
+            self.ARTICLE_CONTENT_XPATH
+        ).text
 
     def _fetch_moods(self):
         """Fetch moodmeter data from the article."""
         logging.info("Triggering moodmeter interaction...")
         self._attempt_moodmeter_interaction()
         logging.info("Fetching moodmeter data...")
-        return self._collect_moodmeter_data()
+        self.article_data.moods = self._collect_moodmeter_data()
 
-    def scrape_article(self):
-        """Scrape article data from the given URL."""
-        logging.info("Scraping article from %s...", self.article_url)
-        self.navigate_to_url(self.article_url)
-        article_data = {
-            "url": self.article_url,
-            "title": None,
-            "content": None,
-            "moods": None,
-        }
+    def scrape_and_save(self):
+        """Scrape article data and save it to a JSON file."""
+        logging.info("Scraping article from %s...", self.article_data.url)
+        self.navigate_to_url(self.article_data.url)
 
         try:
-            article_data["title"] = self._fetch_title()
-            article_data["content"] = self._fetch_content()
-            article_data["moods"] = self._fetch_moods()
+            self._fetch_title()
+            self._fetch_content()
+            self._fetch_moods()
         except TimeoutException as te:
             logging.error(f"A timeout occurred during scraping: {te}")
         except webdriver.common.exceptions.WebDriverException as we:
@@ -192,7 +222,7 @@ class RapplerScraper(BaseScraper):
             logging.error(f"An unexpected error occurred during scraping: {e}")
         finally:
             self.quit_driver()
-            return article_data
+            self.article_data.save(self.output_dir)
 
 
 def parse_arguments():
@@ -244,31 +274,9 @@ def parse_arguments():
     return parser.parse_args()
 
 
-def scrape_and_save_article(url, output_dir="article_data"):
-    """Scrape and save article data to a JSON file."""
-    scraper = RapplerScraper(url)
-    article_data = scraper.scrape_article()
-    save_to_json(article_data, output_dir)
-
-
-def save_to_json(article_data, output_dir="article_data"):
-    """Save article data to a JSON file."""
-    article_url = article_data["url"]
-    url_hash = hashlib.sha256(article_url.encode()).hexdigest()
-
-    if all(value is not None for value in article_data.values()):
-        directory = os.path.join(output_dir, "complete")
-    else:
-        missing_fields = [k for k, v in article_data.items() if v is None]
-        logging.warning("Missing fields: %s.", ", ".join(missing_fields))
-        directory = os.path.join(output_dir, "incomplete")
-
-    os.makedirs(directory, exist_ok=True)
-
-    filename = os.path.join(directory, f"{url_hash}.json")
-    with open(filename, "w", encoding="utf-8") as f:
-        json.dump(article_data, f)
-    logging.info("Saved data to %s.", filename)
+def scrape_and_save_wrapper(url, output_dir):
+    scraper = RapplerScraper(url, output_dir)
+    scraper.scrape_and_save()
 
 
 if __name__ == "__main__":
@@ -288,12 +296,13 @@ if __name__ == "__main__":
             f.write("\n".join(article_urls))
 
     if args.use_multiprocessing:
-        with mp.Pool(processes=mp.cpu_count()) as pool:
+        workers = mp.cpu_count()
+        with mp.Pool(processes=workers) as pool:
             func = partial(
-                scrape_and_save_article,
+                scrape_and_save_wrapper,
                 output_dir=args.output_directory,
             )
             pool.map(func, article_urls)
     else:
         for url in article_urls:
-            scrape_and_save_article(url)
+            scrape_and_save_wrapper(url, args.output_directory)
