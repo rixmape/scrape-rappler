@@ -9,6 +9,8 @@ import json
 import logging
 import multiprocessing as mp
 import os
+import time
+from functools import partial
 
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
@@ -199,34 +201,57 @@ def parse_arguments():
         description="Scrape articles from Rappler website.",
     )
     parser.add_argument(
-        "--main-sitemap",
+        "-s",
+        "--sitemap-url",
         metavar="URL",
         help="URL of the main sitemap",
         default="https://www.rappler.com/sitemap_index.xml",
     )
     parser.add_argument(
-        "--limit-article",
+        "-m",
+        "--max-articles",
         type=int,
         metavar="N",
-        help="limit the number of articles to scrape",
+        help="Maximum number of articles to scrape",
         default=None,
     )
     parser.add_argument(
-        "--enable-multiprocessing",
+        "-p",
+        "--use-multiprocessing",
         action="store_true",
-        help="enable multiprocessing for scraping",
+        help="Use multiprocessing for scraping",
+    )
+    parser.add_argument(
+        "-o",
+        "--output-directory",
+        metavar="DIR",
+        help="Directory to save the article data",
+        default="article_data",
+    )
+    parser.add_argument(
+        "-u",
+        "--save-urls",
+        action="store_true",
+        help="Save the scraped article URLs to a file",
+    )
+    parser.add_argument(
+        "-f",
+        "--urls-file",
+        metavar="FILE",
+        help="File containing the article URLs",
+        default=None,
     )
     return parser.parse_args()
 
 
-def scrape_and_save_article(url):
+def scrape_and_save_article(url, output_dir="article_data"):
     """Scrape and save article data to a JSON file."""
     scraper = RapplerScraper(url)
     article_data = scraper.scrape_article()
-    save_to_json(article_data)
+    save_to_json(article_data, output_dir)
 
 
-def save_to_json(article_data, output_dir="out"):
+def save_to_json(article_data, output_dir="article_data"):
     """Save article data to a JSON file."""
     article_url = article_data["url"]
     url_hash = hashlib.sha256(article_url.encode()).hexdigest()
@@ -249,14 +274,26 @@ def save_to_json(article_data, output_dir="out"):
 if __name__ == "__main__":
     args = parse_arguments()
 
-    sitemap_scraper = SitemapScraper(args.main_sitemap)
-    article_urls = sitemap_scraper.scrape_sitemap(
-        max_url=args.limit_article,
-    )
+    if args.urls_file:
+        with open(args.urls_file, "r", encoding="utf-8") as f:
+            article_urls = f.read().splitlines()
+    else:
+        scraper = SitemapScraper(args.sitemap_url)
+        article_urls = scraper.scrape_sitemap(max_url=args.max_articles)
 
-    if args.enable_multiprocessing:
+    if args.save_urls:
+        time_now = int(time.time())
+        filename = f"article_urls_{time_now}.txt"
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write("\n".join(article_urls))
+
+    if args.use_multiprocessing:
         with mp.Pool(processes=mp.cpu_count()) as pool:
-            pool.map(scrape_and_save_article, article_urls)
+            func = partial(
+                scrape_and_save_article,
+                output_dir=args.output_directory,
+            )
+            pool.map(func, article_urls)
     else:
         for url in article_urls:
             scrape_and_save_article(url)
