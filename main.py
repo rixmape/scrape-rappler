@@ -275,6 +275,16 @@ def parse_arguments():
 
 
 def scrape_and_save_wrapper(url, output_dir):
+    url_hash = hashlib.sha256(url.encode()).hexdigest()
+    complete_dir = os.path.join(output_dir, "complete")
+    incomplete_dir = os.path.join(output_dir, "incomplete")
+    if any(
+        url_hash in filename
+        for directory in (complete_dir, incomplete_dir)
+        for filename in os.listdir(directory)
+    ):
+        logging.info("Article from %s is already scraped.", url)
+        return
     scraper = RapplerScraper(url, output_dir)
     scraper.scrape_and_save()
 
