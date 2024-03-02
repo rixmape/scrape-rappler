@@ -50,7 +50,7 @@ class ArticleData:
 
     def to_json(self):
         """Convert the article data to a JSON string."""
-        return json.dumps(vars(self))
+        return json.dumps(vars(self), indent=4, ensure_ascii=False)
 
     def save(self, output_dir):
         """Save the article data to a JSON file."""
@@ -93,7 +93,7 @@ class BaseScraper:
                 urls.append(url)
         return urls
 
-    def wait_for_element(self, identifier, by=By.XPATH, wait_time=100):
+    def wait_for_element(self, identifier, by=By.XPATH, wait_time=10):
         """Wait for the element to be present in the DOM."""
         return WebDriverWait(self.driver, wait_time).until(
             EC.presence_of_element_located((by, identifier))
@@ -120,9 +120,7 @@ class SitemapScraper(BaseScraper):
 
     def _get_post_sitemaps(self):
         """Extract post sitemaps from the main sitemap."""
-        self.loggerinfo(
-            "Fetching post sitemaps from %s...", self.main_sitemap_url
-        )
+        logger.info("Fetching post sitemaps from %s...", self.main_sitemap_url)
         self.navigate_to_url(self.main_sitemap_url)
         return self.get_urls(lambda url: "post-sitemap" in url)
 
@@ -176,11 +174,14 @@ class RapplerScraper(BaseScraper):
 
     def _fetch_mood_data_from_requests(self):
         """Fetch mood data from the requests."""
+        logger.info("Fetching mood data from requests...")
         mood_data = None
         for request in self.driver.requests:
             if request.response and self.VOTE_API_ENDPOINT in request.url:
                 logger.info("Vote API response received from %s.", request.url)
-                raw_data = json.loads(request.response.body)
+                raw_data = json.loads(
+                    request.response.body.decode("utf-8", "ignore")
+                )
                 mood_data = raw_data["data"]["mood_count"]
                 break
         return mood_data
@@ -201,19 +202,21 @@ class RapplerScraper(BaseScraper):
 
     def _fetch_moods(self):
         """Fetch moods from the article."""
-        logger.info("Fetching existing mood data...")
-        time.sleep(1)  # TODO: Hack; replace by waiting for an element
+        mood_data = None
 
-        mood_data = self._fetch_mood_data_from_requests()
-        if not mood_data:
+        try:
+            logger.info("Checking existing mood data...")
+            self.wait_for_element(self.SEE_MOODS_XPATH)
+            mood_data = self._fetch_mood_data_from_requests()
+        except TimeoutException:
             logger.info("Existing mood data not found.")
             self._emulate_voting()
             mood_data = self._fetch_mood_data_from_requests()
 
-        if mood_data:
-            self.article_data.moods = mood_data
-        else:
+        if not mood_data:
             logger.error("Mood data not found.")
+
+        self.article_data.moods = mood_data
 
     def scrape_and_save(self):
         """Scrape article data and save it to a JSON file."""
