@@ -280,20 +280,30 @@ def parse_arguments():
         help="File containing the article URLs",
         default=None,
     )
+    parser.add_argument(
+        "-i",
+        "--ignore-cache",
+        action="store_true",
+        help="Ignore the cache and scrape the articles again",
+    )
     return parser.parse_args()
 
 
-def scrape_and_save_wrapper(url, output_dir):
-    url_hash = hashlib.sha256(url.encode()).hexdigest()
-    complete_dir = os.path.join(output_dir, "complete")
-    incomplete_dir = os.path.join(output_dir, "incomplete")
-    if os.path.exists(output_dir) and any(
-        url_hash in filename
-        for directory in (complete_dir, incomplete_dir)
-        for filename in os.listdir(directory)
-    ):
-        logger.info("Article from %s is already scraped.", url)
-        return None
+def scrape_and_save_wrapper(url, output_dir, ignore_cache):
+    if not ignore_cache:
+        url_hash = hashlib.sha256(url.encode()).hexdigest()
+        complete_dir = os.path.join(output_dir, "complete")
+        incomplete_dir = os.path.join(output_dir, "incomplete")
+
+        for directory in [output_dir, complete_dir, incomplete_dir]:
+            if not os.path.exists(directory):
+                os.makedirs(directory)
+
+        for directory in [complete_dir, incomplete_dir]:
+            if f"{url_hash}.json" in os.listdir(directory):
+                logger.info("Article from %s is already scraped.", url)
+                return None
+
     scraper = RapplerScraper(url, output_dir)
     scraper.scrape_and_save()
 
@@ -320,8 +330,13 @@ if __name__ == "__main__":
             func = partial(
                 scrape_and_save_wrapper,
                 output_dir=args.output_directory,
+                ignore_cache=args.ignore_cache,
             )
             pool.map(func, article_urls)
     else:
         for url in article_urls:
-            scrape_and_save_wrapper(url, args.output_directory)
+            scrape_and_save_wrapper(
+                url,
+                args.output_directory,
+                args.ignore_cache,
+            )
