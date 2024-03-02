@@ -93,13 +93,13 @@ class BaseScraper:
                 urls.append(url)
         return urls
 
-    def wait_for_element(self, identifier, by=By.XPATH, wait_time=10):
+    def wait_for_element(self, identifier, by=By.CSS_SELECTOR, wait_time=10):
         """Wait for the element to be present in the DOM."""
         return WebDriverWait(self.driver, wait_time).until(
             EC.presence_of_element_located((by, identifier))
         )
 
-    def click_element_via_js(self, identifier, by=By.XPATH):
+    def click_element_via_js(self, identifier, by=By.CSS_SELECTOR):
         """Click the element using JavaScript."""
         element = self.wait_for_element(identifier, by=by)
         self.driver.execute_script("arguments[0].click();", element)
@@ -149,12 +149,12 @@ class SitemapScraper(BaseScraper):
 class RapplerScraper(BaseScraper):
     """Scrape article data from Rappler website."""
 
-    ARTICLE_TITLE_XPATH = "//h1[contains(@class,'post-single__title')]"
-    ARTICLE_CONTENT_XPATH = "//div[contains(@class,'post-single__content')]"
-    MOODS_CONTAINER_XPATH = "//div[contains(@class,'xa3V2iPvKCrXH2KVimTv-g==')]"
-    SEE_MOODS_XPATH = "//div[contains(@class,'AOhvJlN4Z5TsLqKZb1kSBw==')]"
-    VOTE_DIV_XPATH = "//div[contains(@class,'i1IMtjULF3BKu3lB0m1ilg==')]"
-    HAPPY_DIV_XPATH = "//div[contains(@class,'mood-happy')]"
+    ARTICLE_TITLE_CSS = ".post-single__title"
+    ARTICLE_CONTENT_CSS = ".post-single__content"
+    MOODS_CONTAINER_CSS = r".xa3V2iPvKCrXH2KVimTv-g\=\="
+    SEE_MOODS_CSS = r".AOhvJlN4Z5TsLqKZb1kSBw\=\="
+    VOTE_DIV_CSS = r".i1IMtjULF3BKu3lB0m1ilg\=\="
+    HAPPY_DIV_CSS = ".mood-happy"
     VOTE_API_ENDPOINT = "/api/v1/votes"
 
     def __init__(self, article_url, output_dir):
@@ -166,8 +166,8 @@ class RapplerScraper(BaseScraper):
         """Cast a vote on the mood to see reactions."""
         try:
             logger.info("Emulating a vote...")
-            self.click_element_via_js(self.VOTE_DIV_XPATH)
-            self.click_element_via_js(self.HAPPY_DIV_XPATH)
+            self.click_element_via_js(self.VOTE_DIV_CSS)
+            self.click_element_via_js(self.HAPPY_DIV_CSS)
         except TimeoutException:
             logger.error("Failed to emulate a vote.")
             raise TimeoutException
@@ -190,14 +190,14 @@ class RapplerScraper(BaseScraper):
         """Fetch title from the article."""
         logger.info("Fetching title...")
         self.article_data.title = self.wait_for_element(
-            self.ARTICLE_TITLE_XPATH
+            self.ARTICLE_TITLE_CSS
         ).text
 
     def _fetch_content(self):
         """Fetch content from the article."""
         logger.info("Fetching content...")
         self.article_data.content = self.wait_for_element(
-            self.ARTICLE_CONTENT_XPATH
+            self.ARTICLE_CONTENT_CSS
         ).text
 
     def _fetch_moods(self):
@@ -206,7 +206,7 @@ class RapplerScraper(BaseScraper):
 
         try:
             logger.info("Checking existing mood data...")
-            self.wait_for_element(self.SEE_MOODS_XPATH)
+            self.wait_for_element(self.SEE_MOODS_CSS)
             mood_data = self._fetch_mood_data_from_requests()
         except TimeoutException:
             logger.info("Existing mood data not found.")
