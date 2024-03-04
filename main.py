@@ -10,33 +10,123 @@ import logging
 import multiprocessing as mp
 import os
 import time
-from functools import partial
 
-from selenium import webdriver
-from selenium.common.exceptions import TimeoutException
+import firebase_admin
+from firebase_admin import credentials, firestore
+from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
+from seleniumwire import webdriver
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(process)d - %(message)s",
-)
+# TODO: Integrate this block of code into one of the classes
+FIREBASE_CREDENTIALS = "firebase-adminsdk.json"
+COLLECTION_NAME = "articles"
+cred = credentials.Certificate(FIREBASE_CREDENTIALS)
+firebase_admin.initialize_app(cred)
+db = firestore.client()
+
+
+class ArticleData:
+    """Class to store article data."""
+
+    def __init__(self, url, title=None, content=None, moods=None):
+        self.url = url
+        self.url_hash = hashlib.sha256(url.encode()).hexdigest()
+        self.title = title
+        self.content = content
+        self.moods = moods
+
+    def is_complete(self):
+        """Check if the article data is complete."""
+        return all(value is not None for value in vars(self).values())
+
+    def to_json(self):
+        """Convert the article data to a JSON string."""
+        return json.dumps(vars(self), indent=4, ensure_ascii=False)
+
+    def to_dict(self):
+        """Convert the article data to a dictionary."""
+        return vars(self)
+
+    def save(self, output_dir):
+        """Save the article data to a JSON file."""
+        url_hash = hashlib.sha256(self.url.encode()).hexdigest()
+        directory = os.path.join(
+            output_dir,
+            "complete" if self.is_complete() else "incomplete",
+        )
+        os.makedirs(directory, exist_ok=True)
+        filename = os.path.join(directory, f"{url_hash}.json")
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(self.to_json())
+        self.logger.info("Saved data to %s.", filename)
 
 
 class BaseScraper:
     """Base class for web scraping using Selenium."""
 
     def __init__(self):
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.setup_logger()
+
         chrome_options = webdriver.ChromeOptions()
-        chrome_options.add_argument("--headless")
+        # chrome_options.add_argument("--headless")
         chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("log-level=3")
-        chrome_options.add_experimental_option(
-            "prefs",
-            {"profile.managed_default_content_settings.images": 2},
-        )
+
+        prefs = {
+            "profile.default_content_setting_values": {
+                "app_banner": 2,
+                "auto_select_certificate": 2,
+                "automatic_downloads": 2,
+                # "cookies": 2,
+                "durable_storage": 2,
+                "fullscreen": 2,
+                "geolocation": 2,
+                "images": 2,
+                # "javascript": 2,
+                "media_stream_camera": 2,
+                "media_stream_mic": 2,
+                "media_stream": 2,
+                "metro_switch_to_desktop": 2,
+                "midi_sysex": 2,
+                # "mixed_script": 2,
+                "mouselock": 2,
+                "notifications": 2,
+                "plugins": 2,
+                "popups": 2,
+                "ppapi_broker": 2,
+                "protected_media_identifier": 2,
+                "protocol_handlers": 2,
+                "push_messaging": 2,
+                "site_engagement": 2,
+                "ssl_cert_decisions": 2,
+            }
+        }
+        chrome_options.add_experimental_option("prefs", prefs)
+
         self.driver = webdriver.Chrome(options=chrome_options)
+
+    def setup_logger(self):
+        """Setup the logger for the scraper."""
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter(
+            ":".join(
+                [
+                    "%(asctime)s",
+                    "%(levelname)s",
+                    "%(name)s",
+                    "%(message)s",
+                ]
+            )
+        )
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
+        self.logger.setLevel(logging.INFO)
+
+        if not self.logger.hasHandlers():  # Avoid duplicate handlers
+            self.logger.addHandler(handler)
 
     def navigate_to_url(self, url):
         """Navigate to the given URL."""
@@ -51,13 +141,13 @@ class BaseScraper:
                 urls.append(url)
         return urls
 
-    def wait_for_element(self, identifier, by=By.XPATH, wait_time=10):
+    def wait_for_element(self, identifier, by=By.CSS_SELECTOR, wait_time=100):
         """Wait for the element to be present in the DOM."""
         return WebDriverWait(self.driver, wait_time).until(
             EC.presence_of_element_located((by, identifier))
         )
 
-    def click_element_via_js(self, identifier, by=By.XPATH):
+    def click_element_via_js(self, identifier, by=By.CSS_SELECTOR):
         """Click the element using JavaScript."""
         element = self.wait_for_element(identifier, by=by)
         self.driver.execute_script("arguments[0].click();", element)
@@ -78,19 +168,22 @@ class SitemapScraper(BaseScraper):
 
     def _get_post_sitemaps(self):
         """Extract post sitemaps from the main sitemap."""
-        logging.info("Fetching post sitemaps from %s...", self.main_sitemap_url)
+        self.logger.info(
+            "Fetching post sitemaps from %s...",
+            self.main_sitemap_url,
+        )
         self.navigate_to_url(self.main_sitemap_url)
         return self.get_urls(lambda url: "post-sitemap" in url)
 
     def _get_article_urls(self, sitemap):
         """Extract article URLs from the given sitemap."""
-        logging.info("Fetching article URLs from %s...", sitemap)
+        self.logger.info("Fetching article URLs from %s...", sitemap)
         self.navigate_to_url(sitemap)
         return self.get_urls(lambda url: url.startswith(self.BASE_URL))
 
     def scrape_sitemap(self, max_url=None):
         """Scrape certain number of article URLs from the sitemaps."""
-        logging.info("Scraping article URLs from sitemaps...")
+        self.logger.info("Scraping article URLs from sitemaps...")
         post_sitemaps = self._get_post_sitemaps()
         article_urls = []
         for sitemap in post_sitemaps:
@@ -100,99 +193,163 @@ class SitemapScraper(BaseScraper):
                 article_urls = article_urls[:max_url]
                 break
         self.quit_driver()
-        logging.info("Scraped %s article URLs.", len(article_urls))
+        self.logger.info("Scraped %s article URLs.", len(article_urls))
         return article_urls
 
 
 class RapplerScraper(BaseScraper):
     """Scrape article data from Rappler website."""
 
-    ARTICLE_TITLE_XPATH = "//h1[contains(@class,'post-single__title')]"
-    ARTICLE_CONTENT_XPATH = "//div[contains(@class,'post-single__content')]"
-    MOODS_CONTAINER_XPATH = "//div[contains(@class,'xa3V2iPvKCrXH2KVimTv-g==')]"
-    SEE_MOODS_XPATH = "//div[contains(@class,'AOhvJlN4Z5TsLqKZb1kSBw==')]"
-    VOTE_DIV_XPATH = "//div[contains(@class,'i1IMtjULF3BKu3lB0m1ilg==')]"
-    HAPPY_DIV_XPATH = "//div[contains(@class,'mood-happy')]"
+    ARTICLE_TITLE_CSS = ".post-single__title"
+    ARTICLE_CONTENT_CSS = ".post-single__content"
+    MOODS_CONTAINER_CSS = r".xa3V2iPvKCrXH2KVimTv-g\=\="
+    SEE_MOODS_CSS = r".AOhvJlN4Z5TsLqKZb1kSBw\=\="
+    VOTE_DIV_CSS = r".i1IMtjULF3BKu3lB0m1ilg\=\="
+    HAPPY_DIV_CSS = ".mood-happy"
+    VOTE_API_ENDPOINT = "/api/v1/votes"
 
-    def __init__(self, article_url):
+    def __init__(
+        self,
+        article_url,
+        output_dir,
+        ignore_cache,
+        save_to_firestore,
+    ):
         super().__init__()
-        self.article_url = article_url
+        self.article_data = ArticleData(article_url)
+        self.output_dir = output_dir
+        self.ignore_cache = ignore_cache
+        self.save_to_firestore = save_to_firestore
+
+    def _is_article_in_local(self):
+        url_hash = self.article_data.url_hash
+        for subdir in ["complete", "incomplete"]:
+            directory = os.path.join(self.output_dir, subdir)
+            if os.path.exists(os.path.join(directory, f"{url_hash}.json")):
+                return True
+        return False
+
+    def _is_article_in_firestore(self):
+        """Check if the article already exists in Firestore."""
+        url_hash = self.article_data.url_hash
+        docs = (
+            db.collection(COLLECTION_NAME)
+            .where("url_hash", "==", url_hash)
+            .limit(1)
+            .get()
+        )
+        return len(docs) > 0
 
     def _emulate_voting(self):
-        """Cast a vote on the moodmeter to see reactions."""
+        """Cast a vote on the mood to see reactions."""
         try:
-            logging.info("Emulating a vote...")
-            self.click_element_via_js(self.VOTE_DIV_XPATH)
-            self.click_element_via_js(self.HAPPY_DIV_XPATH)
+            self.logger.info("Emulating a vote...")
+            self.click_element_via_js(self.VOTE_DIV_CSS)
+            self.click_element_via_js(self.HAPPY_DIV_CSS)
         except TimeoutException:
-            logging.error("Failed to emulate a vote.")
-            raise TimeoutException  # To be caught by `scrape_article` method
+            self.logger.error("Failed to emulate a vote.")
+            raise TimeoutException
 
-    def _attempt_moodmeter_interaction(self):
-        """Check for reactions and emulate voting if none."""
-        try:
-            logging.info("Checking for reactions...")
-            self.click_element_via_js(self.SEE_MOODS_XPATH)
-        except TimeoutException:
-            logging.warning("No reactions found.")
-            self._emulate_voting()
-
-    def _collect_moodmeter_data(self):
-        """Collect moodmeter data from the article."""
-        logging.info("Fetching moodmeter data...")
-        moodmeter = self.wait_for_element(self.MOODS_CONTAINER_XPATH)
-        moods = [
-            heading.text
-            for heading in moodmeter.find_elements(By.TAG_NAME, "h4")
-        ]
-        percentages = [
-            span.text
-            for span in moodmeter.find_elements(By.TAG_NAME, "span")
-            if "%" in span.text
-        ]
-        return dict(zip(moods, percentages))
+    def _fetch_mood_data_from_requests(self):
+        """Fetch mood data from the requests."""
+        self.logger.info("Fetching mood data from requests...")
+        mood_data = None
+        for request in self.driver.requests:
+            if request.response and self.VOTE_API_ENDPOINT in request.url:
+                self.logger.info(
+                    "Vote API response received from %s.",
+                    request.url,
+                )
+                raw_data = json.loads(
+                    request.response.body.decode("utf-8", "ignore")
+                )
+                raw_data = raw_data["data"]["mood_count"]
+                mood_data = {k.lower(): v for k, v in raw_data.items()}
+                break
+        return mood_data
 
     def _fetch_title(self):
         """Fetch title from the article."""
-        logging.info("Fetching title...")
-        return self.wait_for_element(self.ARTICLE_TITLE_XPATH).text
+        self.logger.info("Fetching title...")
+        self.article_data.title = self.wait_for_element(
+            self.ARTICLE_TITLE_CSS
+        ).text
 
     def _fetch_content(self):
         """Fetch content from the article."""
-        logging.info("Fetching content...")
-        return self.wait_for_element(self.ARTICLE_CONTENT_XPATH).text
+        self.logger.info("Fetching content...")
+        self.article_data.content = self.wait_for_element(
+            self.ARTICLE_CONTENT_CSS
+        ).text
 
     def _fetch_moods(self):
-        """Fetch moodmeter data from the article."""
-        logging.info("Triggering moodmeter interaction...")
-        self._attempt_moodmeter_interaction()
-        logging.info("Fetching moodmeter data...")
-        return self._collect_moodmeter_data()
-
-    def scrape_article(self):
-        """Scrape article data from the given URL."""
-        logging.info("Scraping article from %s...", self.article_url)
-        self.navigate_to_url(self.article_url)
-        article_data = {
-            "url": self.article_url,
-            "title": None,
-            "content": None,
-            "moods": None,
-        }
+        """Fetch moods from the article."""
+        mood_data = None
 
         try:
-            article_data["title"] = self._fetch_title()
-            article_data["content"] = self._fetch_content()
-            article_data["moods"] = self._fetch_moods()
+            self.logger.info("Checking existing mood data...")
+            self.wait_for_element(self.SEE_MOODS_CSS)
+            mood_data = self._fetch_mood_data_from_requests()
+        except TimeoutException:
+            self.logger.info("Existing mood data not found.")
+            self._emulate_voting()
+            mood_data = self._fetch_mood_data_from_requests()
+
+        if not mood_data:
+            self.logger.error("Mood data not found.")
+
+        self.article_data.moods = mood_data
+
+    def _add_to_firestore(self):
+        """Save the article data to Firestore."""
+        if self.article_data.is_complete():
+            doc_ref = db.collection(COLLECTION_NAME).document()
+            doc_ref.set(self.article_data.to_dict())
+            self.logger.info("Saved data to Firestore with ID %s.", doc_ref.id)
+        else:
+            self.logger.warning("Incomplete data not saved to Firestore.")
+
+    def scrape_and_save(self):
+        """Scrape article data and save it to a JSON file."""
+        if (
+            not self.ignore_cache
+            and self.save_to_firestore
+            and self._is_article_in_firestore()
+        ):
+            self.logger.info(
+                "Article already exists in Firestore: %s. Skipping...",
+                self.article_data.url,
+            )
+            return
+
+        if not self.ignore_cache and self._is_article_in_local():
+            self.logger.info(
+                "Article already exists locally: %s. Skipping...",
+                self.article_data.url,
+            )
+            return
+
+        self.logger.info("Scraping article from %s...", self.article_data.url)
+        self.navigate_to_url(self.article_data.url)
+
+        try:
+            self._fetch_title()
+            self._fetch_content()
+            self._fetch_moods()
         except TimeoutException as te:
-            logging.error(f"A timeout occurred during scraping: {te}")
-        except webdriver.common.exceptions.WebDriverException as we:
-            logging.error(f"WebDriver error occurred: {we}")
+            self.logger.error(f"A timeout occurred during scraping: {te}")
+        except WebDriverException as we:
+            self.logger.error(f"WebDriver error occurred: {we}")
         except Exception as e:
-            logging.error(f"An unexpected error occurred during scraping: {e}")
+            self.logger.error(
+                f"An unexpected error occurred during scraping: {e}"
+            )
         finally:
             self.quit_driver()
-            return article_data
+            if self.save_to_firestore:
+                self._add_to_firestore()
+            else:
+                self.article_data.save(self.output_dir)
 
 
 def parse_arguments():
@@ -241,34 +398,19 @@ def parse_arguments():
         help="File containing the article URLs",
         default=None,
     )
+    parser.add_argument(
+        "-i",
+        "--ignore-cache",
+        action="store_true",
+        help="Ignore the cache and scrape the articles again",
+    )
+    parser.add_argument(
+        "-sf",
+        "--save-to-firestore",
+        action="store_true",
+        help="Save the scraped article data to Firestore",
+    )
     return parser.parse_args()
-
-
-def scrape_and_save_article(url, output_dir="article_data"):
-    """Scrape and save article data to a JSON file."""
-    scraper = RapplerScraper(url)
-    article_data = scraper.scrape_article()
-    save_to_json(article_data, output_dir)
-
-
-def save_to_json(article_data, output_dir="article_data"):
-    """Save article data to a JSON file."""
-    article_url = article_data["url"]
-    url_hash = hashlib.sha256(article_url.encode()).hexdigest()
-
-    if all(value is not None for value in article_data.values()):
-        directory = os.path.join(output_dir, "complete")
-    else:
-        missing_fields = [k for k, v in article_data.items() if v is None]
-        logging.warning("Missing fields: %s.", ", ".join(missing_fields))
-        directory = os.path.join(output_dir, "incomplete")
-
-    os.makedirs(directory, exist_ok=True)
-
-    filename = os.path.join(directory, f"{url_hash}.json")
-    with open(filename, "w", encoding="utf-8") as f:
-        json.dump(article_data, f)
-    logging.info("Saved data to %s.", filename)
 
 
 if __name__ == "__main__":
@@ -288,12 +430,22 @@ if __name__ == "__main__":
             f.write("\n".join(article_urls))
 
     if args.use_multiprocessing:
-        with mp.Pool(processes=mp.cpu_count()) as pool:
-            func = partial(
-                scrape_and_save_article,
-                output_dir=args.output_directory,
+        workers = mp.cpu_count()
+        with mp.Pool(processes=workers) as pool:
+            pool.map(
+                lambda url: RapplerScraper(
+                    url,
+                    args.output_directory,
+                    args.ignore_cache,
+                    args.save_to_firestore,
+                ).scrape_and_save(),
+                article_urls,
             )
-            pool.map(func, article_urls)
     else:
         for url in article_urls:
-            scrape_and_save_article(url)
+            RapplerScraper(
+                url,
+                args.output_directory,
+                args.ignore_cache,
+                args.save_to_firestore,
+            ).scrape_and_save()
