@@ -21,6 +21,7 @@ from seleniumwire import webdriver
 
 # TODO: Integrate this block of code into one of the classes
 FIREBASE_CREDENTIALS = "firebase-adminsdk.json"
+COLLECTION_NAME = "articles"
 cred = credentials.Certificate(FIREBASE_CREDENTIALS)
 firebase_admin.initialize_app(cred)
 db = firestore.client()
@@ -31,6 +32,7 @@ class ArticleData:
 
     def __init__(self, url, title=None, content=None, moods=None):
         self.url = url
+        self.url_hash = hashlib.sha256(url.encode()).hexdigest()
         self.title = title
         self.content = content
         self.moods = moods
@@ -219,17 +221,24 @@ class RapplerScraper(BaseScraper):
         self.ignore_cache = ignore_cache
         self.save_to_firestore = save_to_firestore
 
-    def _check_cache(self):
-        url_hash = hashlib.sha256(self.article_data.url.encode()).hexdigest()
+    def _is_article_in_local(self):
+        url_hash = self.article_data.url_hash
         for subdir in ["complete", "incomplete"]:
             directory = os.path.join(self.output_dir, subdir)
             if os.path.exists(os.path.join(directory, f"{url_hash}.json")):
-                self.logger.info(
-                    "Article is already scraped from %s. Skipping...",
-                    self.article_data.url,
-                )
                 return True
         return False
+
+    def _is_article_in_firestore(self):
+        """Check if the article already exists in Firestore."""
+        url_hash = self.article_data.url_hash
+        docs = (
+            db.collection(COLLECTION_NAME)
+            .where("url_hash", "==", url_hash)
+            .limit(1)
+            .get()
+        )
+        return len(docs) > 0
 
     def _emulate_voting(self):
         """Cast a vote on the mood to see reactions."""
@@ -291,24 +300,33 @@ class RapplerScraper(BaseScraper):
 
         self.article_data.moods = mood_data
 
-    def _add_to_firestore(self, collection_name="articles"):
+    def _add_to_firestore(self):
         """Save the article data to Firestore."""
         if self.article_data.is_complete():
-            doc_ref = db.collection(collection_name).document()
+            doc_ref = db.collection(COLLECTION_NAME).document()
             doc_ref.set(self.article_data.to_dict())
             self.logger.info("Saved data to Firestore with ID %s.", doc_ref.id)
         else:
-            self.logger.warning(
-                "Incomplete article data not saved to Firestore."
-            )
+            self.logger.warning("Incomplete data not saved to Firestore.")
 
     def scrape_and_save(self):
         """Scrape article data and save it to a JSON file."""
         if (
             not self.ignore_cache
-            and not self.save_to_firestore
-            and self._check_cache()
+            and self.save_to_firestore
+            and self._is_article_in_firestore()
         ):
+            self.logger.info(
+                "Article already exists in Firestore: %s. Skipping...",
+                self.article_data.url,
+            )
+            return
+
+        if not self.ignore_cache and self._is_article_in_local():
+            self.logger.info(
+                "Article already exists locally: %s. Skipping...",
+                self.article_data.url,
+            )
             return
 
         self.logger.info("Scraping article from %s...", self.article_data.url)
