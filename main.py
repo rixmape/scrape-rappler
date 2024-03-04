@@ -195,10 +195,23 @@ class RapplerScraper(BaseScraper):
     HAPPY_DIV_CSS = ".mood-happy"
     VOTE_API_ENDPOINT = "/api/v1/votes"
 
-    def __init__(self, article_url, output_dir):
+    def __init__(self, article_url, output_dir, ignore_cache=False):
         super().__init__()
         self.article_data = ArticleData(article_url)
         self.output_dir = output_dir
+        self.ignore_cache = ignore_cache
+
+    def _check_cache(self):
+        url_hash = hashlib.sha256(self.article_data.url.encode()).hexdigest()
+        for subdir in ["complete", "incomplete"]:
+            directory = os.path.join(self.output_dir, subdir)
+            if os.path.exists(os.path.join(directory, f"{url_hash}.json")):
+                self.logger.info(
+                    "Article is already scraped from %s. Skipping...",
+                    self.article_data.url,
+                )
+                return True
+        return False
 
     def _emulate_voting(self):
         """Cast a vote on the mood to see reactions."""
@@ -261,6 +274,9 @@ class RapplerScraper(BaseScraper):
 
     def scrape_and_save(self):
         """Scrape article data and save it to a JSON file."""
+        if not self.ignore_cache and self._check_cache():
+            return
+
         self.logger.info("Scraping article from %s...", self.article_data.url)
         self.navigate_to_url(self.article_data.url)
 
@@ -337,21 +353,7 @@ def parse_arguments():
 
 
 def scrape_and_save_wrapper(url, output_dir, ignore_cache):
-    if not ignore_cache:
-        url_hash = hashlib.sha256(url.encode()).hexdigest()
-        complete_dir = os.path.join(output_dir, "complete")
-        incomplete_dir = os.path.join(output_dir, "incomplete")
-
-        for directory in [output_dir, complete_dir, incomplete_dir]:
-            if not os.path.exists(directory):
-                os.makedirs(directory)
-
-        for directory in [complete_dir, incomplete_dir]:
-            if f"{url_hash}.json" in os.listdir(directory):
-                print("Article from %s is already scraped.", url)
-                return None
-
-    scraper = RapplerScraper(url, output_dir)
+    scraper = RapplerScraper(url, output_dir, ignore_cache=ignore_cache)
     scraper.scrape_and_save()
 
 
