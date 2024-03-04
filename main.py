@@ -10,13 +10,20 @@ import logging
 import multiprocessing as mp
 import os
 import time
-from functools import partial
 
-from seleniumwire import webdriver
+import firebase_admin
+from firebase_admin import credentials, firestore
 from selenium.common.exceptions import TimeoutException, WebDriverException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
+from seleniumwire import webdriver
+
+# TODO: Integrate this block of code into one of the classes
+FIREBASE_CREDENTIALS = "firebase-adminsdk.json"
+cred = credentials.Certificate(FIREBASE_CREDENTIALS)
+firebase_admin.initialize_app(cred)
+db = firestore.client()
 
 
 class ArticleData:
@@ -35,6 +42,10 @@ class ArticleData:
     def to_json(self):
         """Convert the article data to a JSON string."""
         return json.dumps(vars(self), indent=4, ensure_ascii=False)
+
+    def to_dict(self):
+        """Convert the article data to a dictionary."""
+        return vars(self)
 
     def save(self, output_dir):
         """Save the article data to a JSON file."""
@@ -78,7 +89,7 @@ class BaseScraper:
                 "media_stream": 2,
                 "metro_switch_to_desktop": 2,
                 "midi_sysex": 2,
-                "mixed_script": 2,
+                # "mixed_script": 2,
                 "mouselock": 2,
                 "notifications": 2,
                 "plugins": 2,
@@ -195,11 +206,18 @@ class RapplerScraper(BaseScraper):
     HAPPY_DIV_CSS = ".mood-happy"
     VOTE_API_ENDPOINT = "/api/v1/votes"
 
-    def __init__(self, article_url, output_dir, ignore_cache=False):
+    def __init__(
+        self,
+        article_url,
+        output_dir,
+        ignore_cache,
+        save_to_firestore,
+    ):
         super().__init__()
         self.article_data = ArticleData(article_url)
         self.output_dir = output_dir
         self.ignore_cache = ignore_cache
+        self.save_to_firestore = save_to_firestore
 
     def _check_cache(self):
         url_hash = hashlib.sha256(self.article_data.url.encode()).hexdigest()
@@ -272,9 +290,24 @@ class RapplerScraper(BaseScraper):
 
         self.article_data.moods = mood_data
 
+    def _add_to_firestore(self, collection_name="articles"):
+        """Save the article data to Firestore."""
+        if self.article_data.is_complete():
+            doc_ref = db.collection(collection_name).document()
+            doc_ref.set(self.article_data.to_dict())
+            self.logger.info("Saved data to Firestore with ID %s.", doc_ref.id)
+        else:
+            self.logger.warning(
+                "Incomplete article data not saved to Firestore."
+            )
+
     def scrape_and_save(self):
         """Scrape article data and save it to a JSON file."""
-        if not self.ignore_cache and self._check_cache():
+        if (
+            not self.ignore_cache
+            and not self.save_to_firestore
+            and self._check_cache()
+        ):
             return
 
         self.logger.info("Scraping article from %s...", self.article_data.url)
@@ -294,7 +327,10 @@ class RapplerScraper(BaseScraper):
             )
         finally:
             self.quit_driver()
-            self.article_data.save(self.output_dir)
+            if self.save_to_firestore:
+                self._add_to_firestore()
+            else:
+                self.article_data.save(self.output_dir)
 
 
 def parse_arguments():
@@ -349,12 +385,13 @@ def parse_arguments():
         action="store_true",
         help="Ignore the cache and scrape the articles again",
     )
+    parser.add_argument(
+        "-sf",
+        "--save-to-firestore",
+        action="store_true",
+        help="Save the scraped article data to Firestore",
+    )
     return parser.parse_args()
-
-
-def scrape_and_save_wrapper(url, output_dir, ignore_cache):
-    scraper = RapplerScraper(url, output_dir, ignore_cache=ignore_cache)
-    scraper.scrape_and_save()
 
 
 if __name__ == "__main__":
@@ -376,16 +413,20 @@ if __name__ == "__main__":
     if args.use_multiprocessing:
         workers = mp.cpu_count()
         with mp.Pool(processes=workers) as pool:
-            func = partial(
-                scrape_and_save_wrapper,
-                output_dir=args.output_directory,
-                ignore_cache=args.ignore_cache,
+            pool.map(
+                lambda url: RapplerScraper(
+                    url,
+                    args.output_directory,
+                    args.ignore_cache,
+                    args.save_to_firestore,
+                ).scrape_and_save(),
+                article_urls,
             )
-            pool.map(func, article_urls)
     else:
         for url in article_urls:
-            scrape_and_save_wrapper(
+            RapplerScraper(
                 url,
                 args.output_directory,
                 args.ignore_cache,
-            )
+                args.save_to_firestore,
+            ).scrape_and_save()

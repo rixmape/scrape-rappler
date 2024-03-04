@@ -2,3 +2,4 @@ venv/
 article_data/
 article_urls/
 *tmp*
+firebase-adminsdk.json
