@@ -18,22 +18,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-logger = logging.getLogger(__name__)
-handler = logging.StreamHandler()
-formatter = logging.Formatter(
-    ":".join(
-        [
-            "%(asctime)s",
-            "%(levelname)s",
-            "%(process)d",
-            "%(message)s",
-        ]
-    )
-)
-handler.setFormatter(formatter)
-logger.addHandler(handler)
-logger.setLevel(logging.INFO)
-
 
 class ArticleData:
     """Class to store article data."""
@@ -63,22 +47,73 @@ class ArticleData:
         filename = os.path.join(directory, f"{url_hash}.json")
         with open(filename, "w", encoding="utf-8") as f:
             f.write(self.to_json())
-        logger.info("Saved data to %s.", filename)
+        self.logger.info("Saved data to %s.", filename)
 
 
 class BaseScraper:
     """Base class for web scraping using Selenium."""
 
     def __init__(self):
+        self.logger = logging.getLogger(self.__class__.__name__)
+        self.setup_logger()
+
         chrome_options = webdriver.ChromeOptions()
-        chrome_options.add_argument("--headless")
+        # chrome_options.add_argument("--headless")
         chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("log-level=3")
-        chrome_options.add_experimental_option(
-            "prefs",
-            {"profile.managed_default_content_settings.images": 2},
-        )
+
+        prefs = {
+            "profile.default_content_setting_values": {
+                "app_banner": 2,
+                "auto_select_certificate": 2,
+                "automatic_downloads": 2,
+                # "cookies": 2,
+                "durable_storage": 2,
+                "fullscreen": 2,
+                "geolocation": 2,
+                "images": 2,
+                # "javascript": 2,
+                "media_stream_camera": 2,
+                "media_stream_mic": 2,
+                "media_stream": 2,
+                "metro_switch_to_desktop": 2,
+                "midi_sysex": 2,
+                "mixed_script": 2,
+                "mouselock": 2,
+                "notifications": 2,
+                "plugins": 2,
+                "popups": 2,
+                "ppapi_broker": 2,
+                "protected_media_identifier": 2,
+                "protocol_handlers": 2,
+                "push_messaging": 2,
+                "site_engagement": 2,
+                "ssl_cert_decisions": 2,
+            }
+        }
+        chrome_options.add_experimental_option("prefs", prefs)
+
         self.driver = webdriver.Chrome(options=chrome_options)
+
+    def setup_logger(self):
+        """Setup the logger for the scraper."""
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter(
+            ":".join(
+                [
+                    "%(asctime)s",
+                    "%(levelname)s",
+                    "%(name)s",
+                    "%(message)s",
+                ]
+            )
+        )
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
+        self.logger.setLevel(logging.INFO)
+
+        if not self.logger.hasHandlers():  # Avoid duplicate handlers
+            self.logger.addHandler(handler)
 
     def navigate_to_url(self, url):
         """Navigate to the given URL."""
@@ -93,13 +128,13 @@ class BaseScraper:
                 urls.append(url)
         return urls
 
-    def wait_for_element(self, identifier, by=By.XPATH, wait_time=10):
+    def wait_for_element(self, identifier, by=By.CSS_SELECTOR, wait_time=100):
         """Wait for the element to be present in the DOM."""
         return WebDriverWait(self.driver, wait_time).until(
             EC.presence_of_element_located((by, identifier))
         )
 
-    def click_element_via_js(self, identifier, by=By.XPATH):
+    def click_element_via_js(self, identifier, by=By.CSS_SELECTOR):
         """Click the element using JavaScript."""
         element = self.wait_for_element(identifier, by=by)
         self.driver.execute_script("arguments[0].click();", element)
@@ -120,19 +155,22 @@ class SitemapScraper(BaseScraper):
 
     def _get_post_sitemaps(self):
         """Extract post sitemaps from the main sitemap."""
-        logger.info("Fetching post sitemaps from %s...", self.main_sitemap_url)
+        self.logger.info(
+            "Fetching post sitemaps from %s...",
+            self.main_sitemap_url,
+        )
         self.navigate_to_url(self.main_sitemap_url)
         return self.get_urls(lambda url: "post-sitemap" in url)
 
     def _get_article_urls(self, sitemap):
         """Extract article URLs from the given sitemap."""
-        logger.info("Fetching article URLs from %s...", sitemap)
+        self.logger.info("Fetching article URLs from %s...", sitemap)
         self.navigate_to_url(sitemap)
         return self.get_urls(lambda url: url.startswith(self.BASE_URL))
 
     def scrape_sitemap(self, max_url=None):
         """Scrape certain number of article URLs from the sitemaps."""
-        logger.info("Scraping article URLs from sitemaps...")
+        self.logger.info("Scraping article URLs from sitemaps...")
         post_sitemaps = self._get_post_sitemaps()
         article_urls = []
         for sitemap in post_sitemaps:
@@ -142,43 +180,59 @@ class SitemapScraper(BaseScraper):
                 article_urls = article_urls[:max_url]
                 break
         self.quit_driver()
-        logger.info("Scraped %s article URLs.", len(article_urls))
+        self.logger.info("Scraped %s article URLs.", len(article_urls))
         return article_urls
 
 
 class RapplerScraper(BaseScraper):
     """Scrape article data from Rappler website."""
 
-    ARTICLE_TITLE_XPATH = "//h1[contains(@class,'post-single__title')]"
-    ARTICLE_CONTENT_XPATH = "//div[contains(@class,'post-single__content')]"
-    MOODS_CONTAINER_XPATH = "//div[contains(@class,'xa3V2iPvKCrXH2KVimTv-g==')]"
-    SEE_MOODS_XPATH = "//div[contains(@class,'AOhvJlN4Z5TsLqKZb1kSBw==')]"
-    VOTE_DIV_XPATH = "//div[contains(@class,'i1IMtjULF3BKu3lB0m1ilg==')]"
-    HAPPY_DIV_XPATH = "//div[contains(@class,'mood-happy')]"
+    ARTICLE_TITLE_CSS = ".post-single__title"
+    ARTICLE_CONTENT_CSS = ".post-single__content"
+    MOODS_CONTAINER_CSS = r".xa3V2iPvKCrXH2KVimTv-g\=\="
+    SEE_MOODS_CSS = r".AOhvJlN4Z5TsLqKZb1kSBw\=\="
+    VOTE_DIV_CSS = r".i1IMtjULF3BKu3lB0m1ilg\=\="
+    HAPPY_DIV_CSS = ".mood-happy"
     VOTE_API_ENDPOINT = "/api/v1/votes"
 
-    def __init__(self, article_url, output_dir):
+    def __init__(self, article_url, output_dir, ignore_cache=False):
         super().__init__()
         self.article_data = ArticleData(article_url)
         self.output_dir = output_dir
+        self.ignore_cache = ignore_cache
+
+    def _check_cache(self):
+        url_hash = hashlib.sha256(self.article_data.url.encode()).hexdigest()
+        for subdir in ["complete", "incomplete"]:
+            directory = os.path.join(self.output_dir, subdir)
+            if os.path.exists(os.path.join(directory, f"{url_hash}.json")):
+                self.logger.info(
+                    "Article is already scraped from %s. Skipping...",
+                    self.article_data.url,
+                )
+                return True
+        return False
 
     def _emulate_voting(self):
         """Cast a vote on the mood to see reactions."""
         try:
-            logger.info("Emulating a vote...")
-            self.click_element_via_js(self.VOTE_DIV_XPATH)
-            self.click_element_via_js(self.HAPPY_DIV_XPATH)
+            self.logger.info("Emulating a vote...")
+            self.click_element_via_js(self.VOTE_DIV_CSS)
+            self.click_element_via_js(self.HAPPY_DIV_CSS)
         except TimeoutException:
-            logger.error("Failed to emulate a vote.")
+            self.logger.error("Failed to emulate a vote.")
             raise TimeoutException
 
     def _fetch_mood_data_from_requests(self):
         """Fetch mood data from the requests."""
-        logger.info("Fetching mood data from requests...")
+        self.logger.info("Fetching mood data from requests...")
         mood_data = None
         for request in self.driver.requests:
             if request.response and self.VOTE_API_ENDPOINT in request.url:
-                logger.info("Vote API response received from %s.", request.url)
+                self.logger.info(
+                    "Vote API response received from %s.",
+                    request.url,
+                )
                 raw_data = json.loads(
                     request.response.body.decode("utf-8", "ignore")
                 )
@@ -188,16 +242,16 @@ class RapplerScraper(BaseScraper):
 
     def _fetch_title(self):
         """Fetch title from the article."""
-        logger.info("Fetching title...")
+        self.logger.info("Fetching title...")
         self.article_data.title = self.wait_for_element(
-            self.ARTICLE_TITLE_XPATH
+            self.ARTICLE_TITLE_CSS
         ).text
 
     def _fetch_content(self):
         """Fetch content from the article."""
-        logger.info("Fetching content...")
+        self.logger.info("Fetching content...")
         self.article_data.content = self.wait_for_element(
-            self.ARTICLE_CONTENT_XPATH
+            self.ARTICLE_CONTENT_CSS
         ).text
 
     def _fetch_moods(self):
@@ -205,22 +259,25 @@ class RapplerScraper(BaseScraper):
         mood_data = None
 
         try:
-            logger.info("Checking existing mood data...")
-            self.wait_for_element(self.SEE_MOODS_XPATH)
+            self.logger.info("Checking existing mood data...")
+            self.wait_for_element(self.SEE_MOODS_CSS)
             mood_data = self._fetch_mood_data_from_requests()
         except TimeoutException:
-            logger.info("Existing mood data not found.")
+            self.logger.info("Existing mood data not found.")
             self._emulate_voting()
             mood_data = self._fetch_mood_data_from_requests()
 
         if not mood_data:
-            logger.error("Mood data not found.")
+            self.logger.error("Mood data not found.")
 
         self.article_data.moods = mood_data
 
     def scrape_and_save(self):
         """Scrape article data and save it to a JSON file."""
-        logger.info("Scraping article from %s...", self.article_data.url)
+        if not self.ignore_cache and self._check_cache():
+            return
+
+        self.logger.info("Scraping article from %s...", self.article_data.url)
         self.navigate_to_url(self.article_data.url)
 
         try:
@@ -228,11 +285,13 @@ class RapplerScraper(BaseScraper):
             self._fetch_content()
             self._fetch_moods()
         except TimeoutException as te:
-            logger.error(f"A timeout occurred during scraping: {te}")
+            self.logger.error(f"A timeout occurred during scraping: {te}")
         except WebDriverException as we:
-            logger.error(f"WebDriver error occurred: {we}")
+            self.logger.error(f"WebDriver error occurred: {we}")
         except Exception as e:
-            logger.error(f"An unexpected error occurred during scraping: {e}")
+            self.logger.error(
+                f"An unexpected error occurred during scraping: {e}"
+            )
         finally:
             self.quit_driver()
             self.article_data.save(self.output_dir)
@@ -294,21 +353,7 @@ def parse_arguments():
 
 
 def scrape_and_save_wrapper(url, output_dir, ignore_cache):
-    if not ignore_cache:
-        url_hash = hashlib.sha256(url.encode()).hexdigest()
-        complete_dir = os.path.join(output_dir, "complete")
-        incomplete_dir = os.path.join(output_dir, "incomplete")
-
-        for directory in [output_dir, complete_dir, incomplete_dir]:
-            if not os.path.exists(directory):
-                os.makedirs(directory)
-
-        for directory in [complete_dir, incomplete_dir]:
-            if f"{url_hash}.json" in os.listdir(directory):
-                logger.info("Article from %s is already scraped.", url)
-                return None
-
-    scraper = RapplerScraper(url, output_dir)
+    scraper = RapplerScraper(url, output_dir, ignore_cache=ignore_cache)
     scraper.scrape_and_save()
 
 
