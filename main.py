@@ -74,13 +74,41 @@ class BaseScraper:
         self.setup_logger()
 
         chrome_options = webdriver.ChromeOptions()
-        chrome_options.add_argument("--headless")
+        # chrome_options.add_argument("--headless")
         chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("log-level=3")
-        chrome_options.add_experimental_option(
-            "prefs",
-            {"profile.managed_default_content_settings.images": 2},
-        )
+
+        prefs = {
+            "profile.default_content_setting_values": {
+                "app_banner": 2,
+                "auto_select_certificate": 2,
+                "automatic_downloads": 2,
+                # "cookies": 2,
+                "durable_storage": 2,
+                "fullscreen": 2,
+                "geolocation": 2,
+                "images": 2,
+                # "javascript": 2,
+                "media_stream_camera": 2,
+                "media_stream_mic": 2,
+                "media_stream": 2,
+                "metro_switch_to_desktop": 2,
+                "midi_sysex": 2,
+                "mixed_script": 2,
+                "mouselock": 2,
+                "notifications": 2,
+                "plugins": 2,
+                "popups": 2,
+                "ppapi_broker": 2,
+                "protected_media_identifier": 2,
+                "protocol_handlers": 2,
+                "push_messaging": 2,
+                "site_engagement": 2,
+                "ssl_cert_decisions": 2,
+            }
+        }
+        chrome_options.add_experimental_option("prefs", prefs)
+
         self.driver = webdriver.Chrome(options=chrome_options)
 
     def setup_logger(self):
@@ -116,7 +144,7 @@ class BaseScraper:
                 urls.append(url)
         return urls
 
-    def wait_for_element(self, identifier, by=By.CSS_SELECTOR, wait_time=10):
+    def wait_for_element(self, identifier, by=By.CSS_SELECTOR, wait_time=100):
         """Wait for the element to be present in the DOM."""
         return WebDriverWait(self.driver, wait_time).until(
             EC.presence_of_element_located((by, identifier))
