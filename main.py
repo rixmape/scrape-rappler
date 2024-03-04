@@ -18,22 +18,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-logger = logging.getLogger(__name__)
-handler = logging.StreamHandler()
-formatter = logging.Formatter(
-    ":".join(
-        [
-            "%(asctime)s",
-            "%(levelname)s",
-            "%(process)d",
-            "%(message)s",
-        ]
-    )
-)
-handler.setFormatter(formatter)
-logger.addHandler(handler)
-logger.setLevel(logging.INFO)
-
 
 class ArticleData:
     """Class to store article data."""
@@ -63,7 +47,7 @@ class ArticleData:
         filename = os.path.join(directory, f"{url_hash}.json")
         with open(filename, "w", encoding="utf-8") as f:
             f.write(self.to_json())
-        logger.info("Saved data to %s.", filename)
+        self.logger.info("Saved data to %s.", filename)
 
 
 class BaseScraper:
@@ -171,19 +155,22 @@ class SitemapScraper(BaseScraper):
 
     def _get_post_sitemaps(self):
         """Extract post sitemaps from the main sitemap."""
-        logger.info("Fetching post sitemaps from %s...", self.main_sitemap_url)
+        self.logger.info(
+            "Fetching post sitemaps from %s...",
+            self.main_sitemap_url,
+        )
         self.navigate_to_url(self.main_sitemap_url)
         return self.get_urls(lambda url: "post-sitemap" in url)
 
     def _get_article_urls(self, sitemap):
         """Extract article URLs from the given sitemap."""
-        logger.info("Fetching article URLs from %s...", sitemap)
+        self.logger.info("Fetching article URLs from %s...", sitemap)
         self.navigate_to_url(sitemap)
         return self.get_urls(lambda url: url.startswith(self.BASE_URL))
 
     def scrape_sitemap(self, max_url=None):
         """Scrape certain number of article URLs from the sitemaps."""
-        logger.info("Scraping article URLs from sitemaps...")
+        self.logger.info("Scraping article URLs from sitemaps...")
         post_sitemaps = self._get_post_sitemaps()
         article_urls = []
         for sitemap in post_sitemaps:
@@ -193,7 +180,7 @@ class SitemapScraper(BaseScraper):
                 article_urls = article_urls[:max_url]
                 break
         self.quit_driver()
-        logger.info("Scraped %s article URLs.", len(article_urls))
+        self.logger.info("Scraped %s article URLs.", len(article_urls))
         return article_urls
 
 
@@ -216,20 +203,23 @@ class RapplerScraper(BaseScraper):
     def _emulate_voting(self):
         """Cast a vote on the mood to see reactions."""
         try:
-            logger.info("Emulating a vote...")
+            self.logger.info("Emulating a vote...")
             self.click_element_via_js(self.VOTE_DIV_CSS)
             self.click_element_via_js(self.HAPPY_DIV_CSS)
         except TimeoutException:
-            logger.error("Failed to emulate a vote.")
+            self.logger.error("Failed to emulate a vote.")
             raise TimeoutException
 
     def _fetch_mood_data_from_requests(self):
         """Fetch mood data from the requests."""
-        logger.info("Fetching mood data from requests...")
+        self.logger.info("Fetching mood data from requests...")
         mood_data = None
         for request in self.driver.requests:
             if request.response and self.VOTE_API_ENDPOINT in request.url:
-                logger.info("Vote API response received from %s.", request.url)
+                self.logger.info(
+                    "Vote API response received from %s.",
+                    request.url,
+                )
                 raw_data = json.loads(
                     request.response.body.decode("utf-8", "ignore")
                 )
@@ -239,14 +229,14 @@ class RapplerScraper(BaseScraper):
 
     def _fetch_title(self):
         """Fetch title from the article."""
-        logger.info("Fetching title...")
+        self.logger.info("Fetching title...")
         self.article_data.title = self.wait_for_element(
             self.ARTICLE_TITLE_CSS
         ).text
 
     def _fetch_content(self):
         """Fetch content from the article."""
-        logger.info("Fetching content...")
+        self.logger.info("Fetching content...")
         self.article_data.content = self.wait_for_element(
             self.ARTICLE_CONTENT_CSS
         ).text
@@ -256,22 +246,22 @@ class RapplerScraper(BaseScraper):
         mood_data = None
 
         try:
-            logger.info("Checking existing mood data...")
+            self.logger.info("Checking existing mood data...")
             self.wait_for_element(self.SEE_MOODS_CSS)
             mood_data = self._fetch_mood_data_from_requests()
         except TimeoutException:
-            logger.info("Existing mood data not found.")
+            self.logger.info("Existing mood data not found.")
             self._emulate_voting()
             mood_data = self._fetch_mood_data_from_requests()
 
         if not mood_data:
-            logger.error("Mood data not found.")
+            self.logger.error("Mood data not found.")
 
         self.article_data.moods = mood_data
 
     def scrape_and_save(self):
         """Scrape article data and save it to a JSON file."""
-        logger.info("Scraping article from %s...", self.article_data.url)
+        self.logger.info("Scraping article from %s...", self.article_data.url)
         self.navigate_to_url(self.article_data.url)
 
         try:
@@ -279,11 +269,13 @@ class RapplerScraper(BaseScraper):
             self._fetch_content()
             self._fetch_moods()
         except TimeoutException as te:
-            logger.error(f"A timeout occurred during scraping: {te}")
+            self.logger.error(f"A timeout occurred during scraping: {te}")
         except WebDriverException as we:
-            logger.error(f"WebDriver error occurred: {we}")
+            self.logger.error(f"WebDriver error occurred: {we}")
         except Exception as e:
-            logger.error(f"An unexpected error occurred during scraping: {e}")
+            self.logger.error(
+                f"An unexpected error occurred during scraping: {e}"
+            )
         finally:
             self.quit_driver()
             self.article_data.save(self.output_dir)
@@ -356,7 +348,7 @@ def scrape_and_save_wrapper(url, output_dir, ignore_cache):
 
         for directory in [complete_dir, incomplete_dir]:
             if f"{url_hash}.json" in os.listdir(directory):
-                logger.info("Article from %s is already scraped.", url)
+                print("Article from %s is already scraped.", url)
                 return None
 
     scraper = RapplerScraper(url, output_dir)
