@@ -254,7 +254,8 @@ class RapplerScraper(BaseScraper):
                 raw_data = json.loads(
                     request.response.body.decode("utf-8", "ignore")
                 )
-                mood_data = raw_data["data"]["mood_count"]
+                raw_data = raw_data["data"]["mood_count"]
+                mood_data = {k.lower(): v for k, v in raw_data.items()}
                 break
         return mood_data
 
