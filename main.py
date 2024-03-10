@@ -24,10 +24,18 @@ from seleniumwire import webdriver
 class ArticleData:
     """Class to store article data."""
 
-    def __init__(self, url, title=None, content=None, moods=None):
+    def __init__(
+        self,
+        url,
+        title=None,
+        datetime=None,
+        content=None,
+        moods=None,
+    ):
         self.url = url
         self.url_hash = hashlib.sha256(url.encode()).hexdigest()
         self.title = title
+        self.datetime = datetime
         self.content = content
         self.moods = moods
 
@@ -54,18 +62,21 @@ class ArticleData:
         filename = os.path.join(directory, f"{url_hash}.json")
         with open(filename, "w", encoding="utf-8") as f:
             f.write(self.to_json())
-        self.logger.info("Saved data to %s.", filename)
+        return filename
 
 
 class BaseScraper:
     """Base class for web scraping using Selenium."""
 
-    def __init__(self):
+    TIMEOUT_SECONDS = 120
+
+    def __init__(self, disable_headless=False):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.setup_logger()
 
         chrome_options = webdriver.ChromeOptions()
-        chrome_options.add_argument("--headless")
+        if not disable_headless:
+            chrome_options.add_argument("--headless")
         chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("log-level=3")
 
@@ -135,7 +146,12 @@ class BaseScraper:
                 urls.append(url)
         return urls
 
-    def wait_for_element(self, identifier, by=By.CSS_SELECTOR, wait_time=10):
+    def wait_for_element(
+        self,
+        identifier,
+        by=By.CSS_SELECTOR,
+        wait_time=TIMEOUT_SECONDS,
+    ):
         """Wait for the element to be present in the DOM."""
         return WebDriverWait(self.driver, wait_time).until(
             EC.presence_of_element_located((by, identifier))
@@ -197,11 +213,13 @@ class RapplerScraper(BaseScraper):
     COLLECTION_NAME = "articles"
     ARTICLE_TITLE_CSS = ".post-single__title"
     ARTICLE_CONTENT_CSS = ".post-single__content"
+    ARTICLE_DATETIME_CSS = ".post__timeago"
     MOODS_CONTAINER_CSS = r".xa3V2iPvKCrXH2KVimTv-g\=\="
     SEE_MOODS_CSS = r".AOhvJlN4Z5TsLqKZb1kSBw\=\="
     VOTE_DIV_CSS = r".i1IMtjULF3BKu3lB0m1ilg\=\="
     HAPPY_DIV_CSS = ".mood-happy"
     VOTE_API_ENDPOINT = "/api/v1/votes"
+    SEE_MOODS_TIMEOUT_SECONDS = 30
 
     def __init__(
         self,
@@ -210,8 +228,9 @@ class RapplerScraper(BaseScraper):
         ignore_cache,
         save_to_firestore,
         firebase_credential_path,
+        disable_headless,
     ):
-        super().__init__()
+        super().__init__(disable_headless=disable_headless)
         self.article_data = ArticleData(article_url)
         self.output_dir = output_dir
         self.ignore_cache = ignore_cache
@@ -277,6 +296,13 @@ class RapplerScraper(BaseScraper):
             self.ARTICLE_TITLE_CSS
         ).text
 
+    def _fetch_datetime(self):
+        """Fetch datetime from the article."""
+        self.logger.info("Fetching datetime...")
+        self.article_data.datetime = self.wait_for_element(
+            self.ARTICLE_DATETIME_CSS
+        ).text
+
     def _fetch_content(self):
         """Fetch content from the article."""
         self.logger.info("Fetching content...")
@@ -290,7 +316,10 @@ class RapplerScraper(BaseScraper):
 
         try:
             self.logger.info("Checking existing mood data...")
-            self.wait_for_element(self.SEE_MOODS_CSS)
+            self.wait_for_element(
+                self.SEE_MOODS_CSS,
+                wait_time=self.SEE_MOODS_TIMEOUT_SECONDS,
+            )
             mood_data = self._fetch_mood_data_from_requests()
         except TimeoutException:
             self.logger.info("Existing mood data not found.")
@@ -336,6 +365,7 @@ class RapplerScraper(BaseScraper):
 
         try:
             self._fetch_title()
+            self._fetch_datetime()
             self._fetch_content()
             self._fetch_moods()
         except TimeoutException as te:
@@ -351,7 +381,8 @@ class RapplerScraper(BaseScraper):
             if self.save_to_firestore:
                 self._add_to_firestore()
             else:
-                self.article_data.save(self.output_dir)
+                filename = self.article_data.save(self.output_dir)
+                self.logger.info("Saved data to %s.", filename)
 
 
 def parse_arguments():
@@ -419,6 +450,12 @@ def parse_arguments():
         help="Path to the Firebase credential file",
         default="firebase-adminsdk.json",
     )
+    parser.add_argument(
+        "-dh",
+        "--disable-headless",
+        action="store_true",
+        help="Disable headless mode for the browser",
+    )
     return parser.parse_args()
 
 
@@ -430,6 +467,7 @@ def scraping_wrapper(url, args):
         args.ignore_cache,
         args.save_to_firestore,
         args.firebase_credential_path,
+        args.disable_headless,
     ).scrape_and_save()
 
 
@@ -438,7 +476,7 @@ if __name__ == "__main__":
 
     if args.urls_file:
         with open(args.urls_file, "r", encoding="utf-8") as f:
-            article_urls = f.read().splitlines()
+            article_urls = [line.strip() for line in f.readlines()]
     else:
         scraper = SitemapScraper(args.sitemap_url)
         article_urls = scraper.scrape_sitemap(max_url=args.max_articles)
