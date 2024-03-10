@@ -68,12 +68,14 @@ class ArticleData:
 class BaseScraper:
     """Base class for web scraping using Selenium."""
 
+    TIMEOUT_SECONDS = 120
+
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.setup_logger()
 
         chrome_options = webdriver.ChromeOptions()
-        # chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--headless")
         chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("log-level=3")
 
@@ -143,7 +145,12 @@ class BaseScraper:
                 urls.append(url)
         return urls
 
-    def wait_for_element(self, identifier, by=By.CSS_SELECTOR, wait_time=100):
+    def wait_for_element(
+        self,
+        identifier,
+        by=By.CSS_SELECTOR,
+        wait_time=TIMEOUT_SECONDS,
+    ):
         """Wait for the element to be present in the DOM."""
         return WebDriverWait(self.driver, wait_time).until(
             EC.presence_of_element_located((by, identifier))
@@ -211,6 +218,7 @@ class RapplerScraper(BaseScraper):
     VOTE_DIV_CSS = r".i1IMtjULF3BKu3lB0m1ilg\=\="
     HAPPY_DIV_CSS = ".mood-happy"
     VOTE_API_ENDPOINT = "/api/v1/votes"
+    SEE_MOODS_TIMEOUT_SECONDS = 30
 
     def __init__(
         self,
@@ -306,7 +314,10 @@ class RapplerScraper(BaseScraper):
 
         try:
             self.logger.info("Checking existing mood data...")
-            self.wait_for_element(self.SEE_MOODS_CSS)
+            self.wait_for_element(
+                self.SEE_MOODS_CSS,
+                wait_time=self.SEE_MOODS_TIMEOUT_SECONDS,
+            )
             mood_data = self._fetch_mood_data_from_requests()
         except TimeoutException:
             self.logger.info("Existing mood data not found.")
@@ -456,7 +467,7 @@ if __name__ == "__main__":
 
     if args.urls_file:
         with open(args.urls_file, "r", encoding="utf-8") as f:
-            article_urls = f.read().splitlines()
+            article_urls = [line.strip() for line in f.readlines()]
     else:
         scraper = SitemapScraper(args.sitemap_url)
         article_urls = scraper.scrape_sitemap(max_url=args.max_articles)
