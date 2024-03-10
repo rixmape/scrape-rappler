@@ -24,10 +24,18 @@ from seleniumwire import webdriver
 class ArticleData:
     """Class to store article data."""
 
-    def __init__(self, url, title=None, content=None, moods=None):
+    def __init__(
+        self,
+        url,
+        title=None,
+        datetime=None,
+        content=None,
+        moods=None,
+    ):
         self.url = url
         self.url_hash = hashlib.sha256(url.encode()).hexdigest()
         self.title = title
+        self.datetime = datetime
         self.content = content
         self.moods = moods
 
@@ -54,7 +62,7 @@ class ArticleData:
         filename = os.path.join(directory, f"{url_hash}.json")
         with open(filename, "w", encoding="utf-8") as f:
             f.write(self.to_json())
-        self.logger.info("Saved data to %s.", filename)
+        return filename
 
 
 class BaseScraper:
@@ -65,7 +73,7 @@ class BaseScraper:
         self.setup_logger()
 
         chrome_options = webdriver.ChromeOptions()
-        chrome_options.add_argument("--headless")
+        # chrome_options.add_argument("--headless")
         chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("log-level=3")
 
@@ -135,7 +143,7 @@ class BaseScraper:
                 urls.append(url)
         return urls
 
-    def wait_for_element(self, identifier, by=By.CSS_SELECTOR, wait_time=10):
+    def wait_for_element(self, identifier, by=By.CSS_SELECTOR, wait_time=100):
         """Wait for the element to be present in the DOM."""
         return WebDriverWait(self.driver, wait_time).until(
             EC.presence_of_element_located((by, identifier))
@@ -197,6 +205,7 @@ class RapplerScraper(BaseScraper):
     COLLECTION_NAME = "articles"
     ARTICLE_TITLE_CSS = ".post-single__title"
     ARTICLE_CONTENT_CSS = ".post-single__content"
+    ARTICLE_DATETIME_CSS = ".post__timeago"
     MOODS_CONTAINER_CSS = r".xa3V2iPvKCrXH2KVimTv-g\=\="
     SEE_MOODS_CSS = r".AOhvJlN4Z5TsLqKZb1kSBw\=\="
     VOTE_DIV_CSS = r".i1IMtjULF3BKu3lB0m1ilg\=\="
@@ -277,6 +286,13 @@ class RapplerScraper(BaseScraper):
             self.ARTICLE_TITLE_CSS
         ).text
 
+    def _fetch_datetime(self):
+        """Fetch datetime from the article."""
+        self.logger.info("Fetching datetime...")
+        self.article_data.datetime = self.wait_for_element(
+            self.ARTICLE_DATETIME_CSS
+        ).text
+
     def _fetch_content(self):
         """Fetch content from the article."""
         self.logger.info("Fetching content...")
@@ -336,6 +352,7 @@ class RapplerScraper(BaseScraper):
 
         try:
             self._fetch_title()
+            self._fetch_datetime()
             self._fetch_content()
             self._fetch_moods()
         except TimeoutException as te:
@@ -351,7 +368,8 @@ class RapplerScraper(BaseScraper):
             if self.save_to_firestore:
                 self._add_to_firestore()
             else:
-                self.article_data.save(self.output_dir)
+                filename = self.article_data.save(self.output_dir)
+                self.logger.info("Saved data to %s.", filename)
 
 
 def parse_arguments():
