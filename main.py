@@ -10,6 +10,7 @@ import logging
 import multiprocessing as mp
 import os
 import time
+from functools import partial
 
 import firebase_admin
 from firebase_admin import credentials, firestore
@@ -18,13 +19,6 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from seleniumwire import webdriver
-
-# TODO: Integrate this block of code into one of the classes
-FIREBASE_CREDENTIALS = "firebase-adminsdk.json"
-COLLECTION_NAME = "articles"
-cred = credentials.Certificate(FIREBASE_CREDENTIALS)
-firebase_admin.initialize_app(cred)
-db = firestore.client()
 
 
 class ArticleData:
@@ -71,7 +65,7 @@ class BaseScraper:
         self.setup_logger()
 
         chrome_options = webdriver.ChromeOptions()
-        # chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--headless")
         chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("log-level=3")
 
@@ -141,7 +135,7 @@ class BaseScraper:
                 urls.append(url)
         return urls
 
-    def wait_for_element(self, identifier, by=By.CSS_SELECTOR, wait_time=100):
+    def wait_for_element(self, identifier, by=By.CSS_SELECTOR, wait_time=10):
         """Wait for the element to be present in the DOM."""
         return WebDriverWait(self.driver, wait_time).until(
             EC.presence_of_element_located((by, identifier))
@@ -200,6 +194,7 @@ class SitemapScraper(BaseScraper):
 class RapplerScraper(BaseScraper):
     """Scrape article data from Rappler website."""
 
+    COLLECTION_NAME = "articles"
     ARTICLE_TITLE_CSS = ".post-single__title"
     ARTICLE_CONTENT_CSS = ".post-single__content"
     MOODS_CONTAINER_CSS = r".xa3V2iPvKCrXH2KVimTv-g\=\="
@@ -214,12 +209,19 @@ class RapplerScraper(BaseScraper):
         output_dir,
         ignore_cache,
         save_to_firestore,
+        firebase_credential_path,
     ):
         super().__init__()
         self.article_data = ArticleData(article_url)
         self.output_dir = output_dir
         self.ignore_cache = ignore_cache
         self.save_to_firestore = save_to_firestore
+        self.firebase_credential_path = firebase_credential_path
+
+        cred = credentials.Certificate(self.firebase_credential_path)
+        if not firebase_admin._apps:
+            firebase_admin.initialize_app(cred)
+        self.db = firestore.client()
 
     def _is_article_in_local(self):
         url_hash = self.article_data.url_hash
@@ -233,8 +235,8 @@ class RapplerScraper(BaseScraper):
         """Check if the article already exists in Firestore."""
         url_hash = self.article_data.url_hash
         docs = (
-            db.collection(COLLECTION_NAME)
-            .where("url_hash", "==", url_hash)
+            self.db.collection(self.COLLECTION_NAME)
+            .where(field_path="url_hash", op_string="==", value=url_hash)
             .limit(1)
             .get()
         )
@@ -303,7 +305,7 @@ class RapplerScraper(BaseScraper):
     def _add_to_firestore(self):
         """Save the article data to Firestore."""
         if self.article_data.is_complete():
-            doc_ref = db.collection(COLLECTION_NAME).document()
+            doc_ref = self.db.collection(self.COLLECTION_NAME).document()
             doc_ref.set(self.article_data.to_dict())
             self.logger.info("Saved data to Firestore with ID %s.", doc_ref.id)
         else:
@@ -410,7 +412,25 @@ def parse_arguments():
         action="store_true",
         help="Save the scraped article data to Firestore",
     )
+    parser.add_argument(
+        "-fc",
+        "--firebase-credential-path",
+        metavar="PATH",
+        help="Path to the Firebase credential file",
+        default="firebase-adminsdk.json",
+    )
     return parser.parse_args()
+
+
+def scraping_wrapper(url, args):
+    """Wrapper function for scraping articles."""
+    RapplerScraper(
+        url,
+        args.output_directory,
+        args.ignore_cache,
+        args.save_to_firestore,
+        args.firebase_credential_path,
+    ).scrape_and_save()
 
 
 if __name__ == "__main__":
@@ -433,19 +453,9 @@ if __name__ == "__main__":
         workers = mp.cpu_count()
         with mp.Pool(processes=workers) as pool:
             pool.map(
-                lambda url: RapplerScraper(
-                    url,
-                    args.output_directory,
-                    args.ignore_cache,
-                    args.save_to_firestore,
-                ).scrape_and_save(),
+                partial(scraping_wrapper, args=args),
                 article_urls,
             )
     else:
         for url in article_urls:
-            RapplerScraper(
-                url,
-                args.output_directory,
-                args.ignore_cache,
-                args.save_to_firestore,
-            ).scrape_and_save()
+            scraping_wrapper(url, args)
