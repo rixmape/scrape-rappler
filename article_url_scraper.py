@@ -72,7 +72,10 @@ async def scrape_article_urls(
     logging.info("Fetching article URLs from %s...", url)
     url_tags = await parse_sitemap(url, "url", session)
     article_urls = [tag.find("loc").text for tag in url_tags]
-    write_to_file(article_urls, output_dir)
+    if not article_urls:
+        logging.warning("No article URLs found in %s", url)
+    else:
+        write_to_file(article_urls, output_dir)
 
 
 def write_to_file(
