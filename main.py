@@ -70,12 +70,13 @@ class BaseScraper:
 
     TIMEOUT_SECONDS = 120
 
-    def __init__(self):
+    def __init__(self, disable_headless=False):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.setup_logger()
 
         chrome_options = webdriver.ChromeOptions()
-        chrome_options.add_argument("--headless")
+        if not disable_headless:
+            chrome_options.add_argument("--headless")
         chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("log-level=3")
 
@@ -227,8 +228,9 @@ class RapplerScraper(BaseScraper):
         ignore_cache,
         save_to_firestore,
         firebase_credential_path,
+        disable_headless,
     ):
-        super().__init__()
+        super().__init__(disable_headless=disable_headless)
         self.article_data = ArticleData(article_url)
         self.output_dir = output_dir
         self.ignore_cache = ignore_cache
@@ -448,6 +450,12 @@ def parse_arguments():
         help="Path to the Firebase credential file",
         default="firebase-adminsdk.json",
     )
+    parser.add_argument(
+        "-dh",
+        "--disable-headless",
+        action="store_true",
+        help="Disable headless mode for the browser",
+    )
     return parser.parse_args()
 
 
@@ -459,6 +467,7 @@ def scraping_wrapper(url, args):
         args.ignore_cache,
         args.save_to_firestore,
         args.firebase_credential_path,
+        args.disable_headless,
     ).scrape_and_save()
 
 
